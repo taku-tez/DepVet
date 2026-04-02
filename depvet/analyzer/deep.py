@@ -11,6 +11,7 @@ from typing import Optional
 from depvet.analyzer.base import BaseAnalyzer
 from depvet.differ.chunker import DiffChunk
 from depvet.analyzer.rules import RuleMatch
+from depvet.analyzer.version_signal import VersionTransitionContext
 from depvet.models.verdict import (
     DiffStats,
     Finding,
@@ -67,7 +68,7 @@ class VerdictMerger:
     - summary: take summary from the most severe chunk
     """
 
-    def merge(self, raw_verdicts: list[dict], model: str, diff_stats: DiffStats, start_ms: int, rule_matches: list | None = None) -> Verdict:
+    def merge(self, raw_verdicts: list[dict], model: str, diff_stats: DiffStats, start_ms: int, rule_matches: list | None = None, version_context: VersionTransitionContext | None = None) -> Verdict:
         if not raw_verdicts:
             return Verdict(
                 verdict=VerdictType.UNKNOWN,
@@ -159,6 +160,30 @@ class VerdictMerger:
                 if any(rm.severity.value in ("CRITICAL", "HIGH") for rm in rule_matches):
                     best_verdict_type = VerdictType.MALICIOUS
 
+        # Apply version transition signal escalation
+        if version_context and version_context.signals:
+            # Boost confidence
+            confidence = min(1.0, confidence + version_context.total_confidence_boost)
+
+            # Escalation rules:
+            # 1. CRITICAL rule + any version signal → MALICIOUS
+            # 2. HIGH rule + HIGH version signal → MALICIOUS
+            # 3. LLM BENIGN + HIGH version signal → SUSPICIOUS
+            has_critical_rule = any(
+                getattr(m, "severity", None) and m.severity.value == "CRITICAL"
+                for m in (rule_matches or [])
+            )
+            has_high_version_signal = version_context.has_high_risk_signals
+
+            if has_critical_rule and has_high_version_signal:
+                best_verdict_type = VerdictType.MALICIOUS
+            elif best_verdict_type == VerdictType.BENIGN and has_high_version_signal:
+                best_verdict_type = VerdictType.SUSPICIOUS
+
+            # Append version signals to summary
+            if version_context.summary():
+                summary = (summary + "\n" + version_context.summary()).strip()
+
         return Verdict(
             verdict=best_verdict_type,
             severity=best_severity,
@@ -192,6 +217,7 @@ class DeepAnalyzer:
         ecosystem: str,
         diff_stats: DiffStats,
         rule_matches: list | None = None,
+        version_context: VersionTransitionContext | None = None,
     ) -> Verdict:
         start_ms = int(time.time() * 1000)
         total = len(chunks)
@@ -224,4 +250,5 @@ class DeepAnalyzer:
             diff_stats=diff_stats,
             start_ms=start_ms,
             rule_matches=rule_matches or [],
+            version_context=version_context,
         )
