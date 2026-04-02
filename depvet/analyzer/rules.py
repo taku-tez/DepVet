@@ -223,6 +223,18 @@ MALICIOUS_PATTERNS: list[dict] = [
         "description": "IPアドレスへの直接ソケット接続が追加された",
         "cwe": "CWE-913",
     },
+    # npm install hooks (postinstall/preinstall/install with code execution)
+    {
+        "id": "NPM_INSTALL_HOOK",
+        "pattern": re.compile(
+            r'"(?:postinstall|preinstall|install)"\s*:\s*"(?:node\s+-e|nodejs\s+-e|sh\s+-c|bash\s+-c|python\s+-c)',
+            re.IGNORECASE,
+        ),
+        "category": FindingCategory.BUILD_HOOK_ABUSE,
+        "severity": Severity.CRITICAL,
+        "description": "package.jsonのインストールフックに直接コード実行コマンドが設定された",
+        "cwe": "CWE-829",
+    },
     # CI/Sandbox evasion: check for CI env vars before executing
     {
         "id": "CI_EVASION",
