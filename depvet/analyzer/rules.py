@@ -171,7 +171,7 @@ MALICIOUS_PATTERNS: list[dict] = [
             re.IGNORECASE,
         ),
         "category": FindingCategory.EXECUTION,
-        "severity": Severity.MEDIUM,
+        "severity": Severity.LOW,
         "description": "動的インポートが追加された（実行時コードロードの可能性）",
         "cwe": "CWE-913",
     },

@@ -45,4 +45,9 @@ SKIP_PATTERNS = [
     "CHANGELOG*",
     "*.md",
     "*.rst",
+    "*.dist-info/",
+    "*.egg-info/",
+    "METADATA",
+    "RECORD",
+    "WHEEL",
 ]
