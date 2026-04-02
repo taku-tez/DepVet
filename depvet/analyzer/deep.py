@@ -165,20 +165,25 @@ class VerdictMerger:
             # Boost confidence
             confidence = min(1.0, confidence + version_context.total_confidence_boost)
 
-            # Escalation rules:
-            # 1. CRITICAL rule + any version signal → MALICIOUS
-            # 2. HIGH rule + HIGH version signal → MALICIOUS
-            # 3. LLM BENIGN + HIGH version signal → SUSPICIOUS
             has_critical_rule = any(
                 getattr(m, "severity", None) and m.severity.value == "CRITICAL"
                 for m in (rule_matches or [])
             )
             has_high_version_signal = version_context.has_high_risk_signals
+            llm_high_confidence_benign = (
+                best_verdict_type == VerdictType.BENIGN and confidence > 0.90
+            )
 
+            # Escalation rules (with high-confidence BENIGN protection):
+            # Rule A: CRITICAL rule + HIGH signal → MALICIOUS (always, even high-conf benign)
+            # Rule B: BENIGN + HIGH signal, but LLM confidence < 0.90 → SUSPICIOUS
+            # Rule C: BENIGN + HIGH signal, LLM confidence >= 0.90 + no CRITICAL rule → keep BENIGN
             if has_critical_rule and has_high_version_signal:
                 best_verdict_type = VerdictType.MALICIOUS
             elif best_verdict_type == VerdictType.BENIGN and has_high_version_signal:
-                best_verdict_type = VerdictType.SUSPICIOUS
+                if not llm_high_confidence_benign:
+                    best_verdict_type = VerdictType.SUSPICIOUS
+                # else: trust high-confidence LLM BENIGN verdict (Rule C)
 
             # Append version signals to summary
             if version_context.summary():

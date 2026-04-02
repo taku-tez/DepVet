@@ -23,6 +23,24 @@ import aiohttp
 logger = logging.getLogger(__name__)
 
 
+# Security-related packages — long dormancy is expected, don't penalize
+SECURITY_PACKAGES = frozenset({
+    "cryptography", "pyopenssl", "paramiko", "bcrypt", "pyca",
+    "pynacl", "cffi", "certifi", "urllib3",
+    "openssl", "libsodium", "gnupg",
+    # npm
+    "helmet", "jsonwebtoken", "bcryptjs", "node-forge",
+    "argon2", "tweetnacl", "elliptic",
+})
+
+def _is_security_package(name: str) -> bool:
+    name_lower = name.lower()
+    return (
+        name_lower in SECURITY_PACKAGES or
+        any(kw in name_lower for kw in ("crypto", "ssl", "tls", "auth", "cipher", "hash", "sign"))
+    )
+
+
 @dataclass
 class VersionSignal:
     """A suspicious signal detected in the version transition."""
@@ -301,3 +319,87 @@ def _extract_upload_time(files: list[dict]) -> Optional[datetime]:
             except Exception:
                 pass
     return min(times) if times else None
+
+
+async def analyze_diff_stats_signals(
+    diff_stats,
+    package_name: str,
+    ecosystem: str,
+) -> list[VersionSignal]:
+    """
+    Derive suspicious signals from DiffStats.
+
+    These signals don't require network calls — they use data already computed
+    from the diff itself.
+    """
+    signals: list[VersionSignal] = []
+
+    if diff_stats is None:
+        return signals
+
+    total_added = diff_stats.lines_added
+    total_removed = diff_stats.lines_removed
+    files_changed = diff_stats.files_changed
+    new_files = diff_stats.new_files
+    deleted_files = diff_stats.deleted_files
+    binary_files = diff_stats.binary_files
+
+    # Signal: Massive code addition relative to deletion (inject-heavy)
+    if total_removed > 0 and total_added / max(total_removed, 1) > 5:
+        if total_added > 50:
+            signals.append(VersionSignal(
+                signal_id="LARGE_ADDITION",
+                description=f"削除{total_removed}行に対して追加{total_added}行（注入型変更の疑い）",
+                severity="MEDIUM",
+                confidence_boost=0.05,
+            ))
+    elif total_removed == 0 and total_added > 100:
+        # Pure addition with no removals — very common in backdoor injection
+        signals.append(VersionSignal(
+            signal_id="PURE_ADDITION",
+            description=f"既存コードへの純粋追加（{total_added}行）—削除なし",
+            severity="MEDIUM",
+            confidence_boost=0.07,
+        ))
+
+    # Signal: Test files deleted (attackers remove tests to avoid detection)
+    test_files_deleted = [
+        f for f in deleted_files
+        if any(pat in f for pat in ("test_", "_test", ".spec.", ".test.", "/test/", "/tests/"))
+    ]
+    if test_files_deleted and len(test_files_deleted) >= 2:
+        signals.append(VersionSignal(
+            signal_id="TESTS_DELETED",
+            description=f"テストファイルが{len(test_files_deleted)}件削除された（悪意コードのテスト検出回避の疑い）",
+            severity="HIGH",
+            confidence_boost=0.15,
+        ))
+
+    # Signal: Binary files added (potential payload embedding)
+    suspicious_binaries = [
+        f for f in binary_files
+        if any(f.endswith(ext) for ext in (".so", ".dll", ".exe", ".bin", ".pyc"))
+        and not f.endswith(".pyc")  # compiled python is normal
+    ]
+    if suspicious_binaries:
+        signals.append(VersionSignal(
+            signal_id="BINARY_ADDED",
+            description=f"実行可能バイナリが追加された: {', '.join(suspicious_binaries[:2])}",
+            severity="HIGH",
+            confidence_boost=0.20,
+        ))
+
+    # Signal: Setup/build files modified (install-time execution vector)
+    build_files_changed = [
+        f for f in (new_files + [f for f in deleted_files])
+        if any(pat in f for pat in ("setup.py", "pyproject.toml", "package.json", "binding.gyp"))
+    ]
+    if build_files_changed:
+        signals.append(VersionSignal(
+            signal_id="BUILD_FILES_CHANGED",
+            description=f"ビルドファイルが変更された: {', '.join(build_files_changed[:2])}",
+            severity="MEDIUM",
+            confidence_boost=0.08,
+        ))
+
+    return signals

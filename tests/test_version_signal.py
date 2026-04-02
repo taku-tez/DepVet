@@ -59,14 +59,28 @@ def test_summary_format():
 # ─── Escalation in VerdictMerger ─────────────────────────────────────────────
 
 def test_benign_escalates_to_suspicious_with_high_signal():
-    """LLM says BENIGN but version context has HIGH signal → escalate to SUSPICIOUS."""
+    """LLM says BENIGN with low confidence (<0.90) + HIGH signal → SUSPICIOUS."""
     merger = VerdictMerger()
-    raw = [{"verdict": "BENIGN", "severity": "NONE", "confidence": 0.9, "findings": [], "summary": "OK"}]
+    # confidence=0.60: below 0.90 threshold → escalation applies
+    raw = [{"verdict": "BENIGN", "severity": "NONE", "confidence": 0.60, "findings": [], "summary": "OK"}]
     ctx = make_context_with_signals(
         VersionSignal("MAINTAINER_CHANGE", "メンテナー変更", "HIGH", 0.20)
     )
     result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0, version_context=ctx)
     assert result.verdict == VerdictType.SUSPICIOUS
+
+
+def test_high_confidence_benign_not_overridden():
+    """LLM says BENIGN with high confidence (>=0.90) + HIGH signal → keep BENIGN (Rule C)."""
+    merger = VerdictMerger()
+    # confidence=0.95: above 0.90 → LLM trusted, BENIGN preserved
+    raw = [{"verdict": "BENIGN", "severity": "NONE", "confidence": 0.95, "findings": [], "summary": "OK"}]
+    ctx = make_context_with_signals(
+        VersionSignal("MAINTAINER_CHANGE", "メンテナー変更", "HIGH", 0.20)
+    )
+    result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0, version_context=ctx)
+    # High-confidence BENIGN should be preserved even with version signal
+    assert result.verdict == VerdictType.BENIGN
 
 
 def test_confidence_boosted_by_version_signals():

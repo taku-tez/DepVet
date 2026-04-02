@@ -323,3 +323,195 @@ def is_likely_benign(diff_content: str) -> bool:
         re.match(r"^__version__", line) or re.match(r"^#", line)
     )
     return benign_count / len(added_lines) > 0.9
+
+
+# ─── Window-based multi-line pattern scanner ──────────────────────────────────
+
+WINDOW_PATTERNS: list[dict] = [
+    # base64 decode + exec/eval within 5 lines (most common supply chain attack)
+    {
+        "id": "BASE64_EXEC_CHAIN",
+        "patterns": [
+            re.compile(r"base64\.(b64decode|decodebytes|urlsafe_b64decode)\s*\(", re.IGNORECASE),
+            re.compile(r"\b(exec|eval|compile)\s*\(", re.IGNORECASE),
+        ],
+        "window": 5,
+        "category": FindingCategory.OBFUSCATION,
+        "severity": Severity.CRITICAL,
+        "description": "base64デコード＋exec/evalの組み合わせが近接行に存在する（典型的難読化攻撃）",
+        "cwe": "CWE-506",
+    },
+    # env var read + network request within 8 lines (exfiltration pattern)
+    {
+        "id": "ENV_EXFIL_CHAIN",
+        "patterns": [
+            re.compile(r"os\.(environ|getenv)\s*[\[(.]", re.IGNORECASE),
+            re.compile(
+                r"(urllib|requests|http\.client|socket|aiohttp|httpx).*?(open|get|post|connect|urlopen)",
+                re.IGNORECASE,
+            ),
+        ],
+        "window": 8,
+        "category": FindingCategory.EXFILTRATION,
+        "severity": Severity.CRITICAL,
+        "description": "環境変数読み取りと外部ネットワーク送信が近接行に存在する（認証情報窃取パターン）",
+        "cwe": "CWE-200",
+    },
+    # subprocess + hardcoded command (execute phase)
+    {
+        "id": "SUBPROCESS_HARDCODED",
+        "patterns": [
+            re.compile(r"(subprocess\.(run|Popen|call|check_output)|os\.system)\s*\(", re.IGNORECASE),
+            re.compile(r"""["'](curl|wget|bash|sh|powershell|cmd\.exe)\s""", re.IGNORECASE),
+        ],
+        "window": 3,
+        "category": FindingCategory.EXECUTION,
+        "severity": Severity.CRITICAL,
+        "description": "subprocess/os.systemとダウンロード/シェルコマンドの組み合わせが検出された",
+        "cwe": "CWE-78",
+    },
+    # Dynamic import + exec (code loading pattern)
+    {
+        "id": "DYNAMIC_IMPORT_EXEC",
+        "patterns": [
+            re.compile(r"(__import__|importlib\.import_module)\s*\(", re.IGNORECASE),
+            re.compile(r"\b(exec|eval)\s*\(", re.IGNORECASE),
+        ],
+        "window": 5,
+        "category": FindingCategory.EXECUTION,
+        "severity": Severity.HIGH,
+        "description": "動的インポートとexec/evalの組み合わせが検出された",
+        "cwe": "CWE-913",
+    },
+    # npm: Buffer hex decode + exec (common npm attack)
+    {
+        "id": "NPM_HEX_EXEC",
+        "patterns": [
+            re.compile(
+                r"Buffer[.](from|alloc)\s*[(]|atob\s*[(]|btoa\s*[(]",
+                re.IGNORECASE,
+            ),
+            re.compile(
+                r"(eval|Function\s*[(]|child_process|require\s*[(])",
+                re.IGNORECASE,
+            ),
+        ],
+        "window": 5,
+        "category": FindingCategory.OBFUSCATION,
+        "severity": Severity.CRITICAL,
+        "description": "Bufferデコード（hex/base64）とeval/require/child_processの組み合わせ（npm典型攻撃）",
+        "cwe": "CWE-506",
+    },
+]
+
+
+def scan_diff_windowed(diff_content: str, filepath: str = "") -> list[RuleMatch]:
+    """
+    Multi-line window scanner: detects attack patterns that span multiple lines.
+
+    More accurate than single-line scan because it:
+    - Requires BOTH parts of an attack chain to be present
+    - Reduces false positives from innocent base64 or os.environ usage
+    """
+    matches: list[RuleMatch] = []
+
+    # Extract added lines with numbers
+    added_lines: list[tuple[int, str]] = []
+    current_line = 0
+    for line in diff_content.splitlines():
+        if line.startswith("@@"):
+            m = re.search(r"\+(\d+)", line)
+            if m:
+                current_line = int(m.group(1)) - 1
+        elif line.startswith("+") and not line.startswith("+++"):
+            current_line += 1
+            added_lines.append((current_line, line[1:]))
+        elif not line.startswith("-"):
+            current_line += 1
+
+    if not added_lines:
+        return matches
+
+    lines_only = [l for _, l in added_lines]
+
+    for pattern_def in WINDOW_PATTERNS:
+        window = pattern_def["window"]
+        patterns = pattern_def["patterns"]
+
+        # Slide a window over added lines
+        for i in range(len(lines_only)):
+            window_lines = lines_only[i : i + window]
+            window_text = "\n".join(window_lines)
+
+            # All patterns must match within the window
+            all_match = all(p.search(window_text) for p in patterns)
+            if not all_match:
+                continue
+
+            # Avoid duplicate matches at same location
+            actual_line = added_lines[i][0]
+            already = any(
+                r.rule_id == pattern_def["id"] and r.line_number == actual_line
+                for r in matches
+            )
+            if already:
+                continue
+
+            # Best evidence: the first matching line
+            evidence = lines_only[i][:50]
+            matches.append(RuleMatch(
+                rule_id=pattern_def["id"],
+                category=pattern_def["category"],
+                severity=pattern_def["severity"],
+                description=pattern_def["description"],
+                evidence=evidence,
+                file=filepath,
+                line_number=actual_line,
+                cwe=pattern_def.get("cwe"),
+            ))
+
+    return matches
+
+
+SEVERITY_ORDER_RULES: dict = {
+    Severity.CRITICAL: 5, Severity.HIGH: 4,
+    Severity.MEDIUM: 3, Severity.LOW: 2, Severity.NONE: 1,
+}
+
+
+def scan_diff_full(diff_content: str, filepath: str = "") -> list[RuleMatch]:
+    """
+    Full scanner: combines single-line rules + window-based chain detection.
+
+    Single-line rules catch obvious atomic IOCs.
+    Window rules catch multi-line attack chains with higher confidence.
+    Window CRITICAL results override single-line MEDIUM results for same category.
+    """
+    single = scan_diff(diff_content, filepath)
+    window = scan_diff_windowed(diff_content, filepath)
+
+    # Window results have higher confidence; if window found CRITICAL for a category,
+    # remove lower-severity single-line hits for the same category (reduce noise)
+    window_critical_cats = {m.category for m in window if m.severity == Severity.CRITICAL}
+    filtered_single = [
+        m for m in single
+        if not (m.category in window_critical_cats and m.severity.value in ("LOW", "MEDIUM"))
+    ]
+
+    combined = filtered_single + window
+
+    # Deduplicate: keep highest severity per (rule_id, file, line) combination
+    seen: dict[tuple, RuleMatch] = {}
+    for m in combined:
+        key = (m.rule_id, m.file, m.line_number)
+        if key not in seen or (
+            SEVERITY_ORDER_RULES.get(m.severity, 0) > SEVERITY_ORDER_RULES.get(seen[key].severity, 0)
+        ):
+            seen[key] = m
+
+    # Sort: CRITICAL first, then HIGH, then by line number
+    result = sorted(
+        seen.values(),
+        key=lambda m: (-SEVERITY_ORDER_RULES.get(m.severity, 0), m.line_number or 0),
+    )
+    return result

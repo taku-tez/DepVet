@@ -58,7 +58,8 @@ class ClaudeAnalyzer(BaseAnalyzer):
         self.max_tokens = max_tokens
         self.timeout = timeout
         self._triage_template = _load_prompt("triage.txt")
-        self._deep_template = _load_prompt("deep_analysis.txt")
+        self._deep_template_pypi = _load_prompt("deep_analysis.txt")
+        self._deep_template_npm = _load_prompt("deep_analysis_npm.txt")
 
     def get_model_name(self) -> str:
         return self.model
@@ -99,7 +100,9 @@ class ClaudeAnalyzer(BaseAnalyzer):
         new_version: str,
         ecosystem: str,
     ) -> dict:
-        prompt = self._deep_template.format(
+        # Use ecosystem-specific prompt
+        template = self._deep_template_npm if ecosystem == "npm" else self._deep_template_pypi
+        prompt = template.format(
             chunk_index=chunk_index + 1,
             total_chunks=total_chunks,
             ecosystem=ecosystem,

