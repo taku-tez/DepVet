@@ -81,7 +81,7 @@ class OSVChecker:
                 summary=summary,
                 source="osv",
                 reported_at=vuln.get("published", ""),
-                cve=next((a["id"] for a in vuln.get("aliases", []) if a.startswith("CVE-")), None)
+                cve=next((a for a in vuln.get("aliases", []) if isinstance(a, str) and a.startswith("CVE-")), None)
                     if isinstance(vuln.get("aliases", []), list) else None,
                 osv_id=osv_id,
             ))

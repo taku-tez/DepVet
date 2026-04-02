@@ -110,7 +110,7 @@ async def _scan(config, package, old_version, new_version, ecosystem, json_outpu
     from depvet.differ.diff_generator import generate_diff
     from depvet.analyzer.triage import TriageAnalyzer
     from depvet.analyzer.deep import DeepAnalyzer
-    from depvet.alert.stdout import StdoutAlerter
+    from depvet.alert.stdout import StdoutAlert
     from depvet.models.alert import AlertEvent
     from depvet.models.package import Release
     from datetime import datetime, timezone
@@ -177,8 +177,8 @@ async def _scan(config, package, old_version, new_version, ecosystem, json_outpu
         )
         event = AlertEvent(release=release, verdict=verdict)
 
-        alerter = StdoutAlerter(json_mode=json_output, min_severity="LOW")
-        await alerter.send(event)
+        alerter = StdoutAlert()
+        alerter.send(event)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -253,7 +253,7 @@ def analyze(ctx, diff_file, json_output, model, package, old_version, new_versio
 async def _analyze(config, diff_file, json_output, package, old_version, new_version, ecosystem):
     from depvet.differ.chunker import DiffChunker, DiffFile
     from depvet.analyzer.deep import DeepAnalyzer
-    from depvet.alert.stdout import StdoutAlerter
+    from depvet.alert.stdout import StdoutAlert
     from depvet.models.alert import AlertEvent
     from depvet.models.package import Release
     from depvet.models.verdict import DiffStats
@@ -285,8 +285,8 @@ async def _analyze(config, diff_file, json_output, package, old_version, new_ver
         url="",
     )
     event = AlertEvent(release=release, verdict=verdict)
-    alerter = StdoutAlerter(json_mode=json_output, min_severity="LOW")
-    await alerter.send(event)
+    alerter = StdoutAlert()
+    alerter.send(event)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -316,8 +316,6 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
     from depvet.watchlist.manager import WatchlistManager
     from depvet.watchlist.top_n import TopNSource
     from depvet.alert.router import AlertRouter
-    from depvet.alert.stdout import StdoutAlerter
-    from depvet.alert.slack import SlackAlerter
     from depvet.analyzer.triage import TriageAnalyzer
     from depvet.analyzer.deep import DeepAnalyzer
     from depvet.models.alert import AlertEvent
@@ -352,10 +350,11 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
             click.echo(f"  → {len(pkgs)} packages added")
 
     # Alert router
-    router = AlertRouter(min_severity=config.alert.min_severity)
-    router.register(StdoutAlerter(min_severity=config.alert.min_severity))
-    if slack:
-        router.register(SlackAlerter(webhook_env=config.alert.slack_webhook_env))
+    slack_webhook = os.environ.get(config.alert.slack_webhook_env) if slack else None
+    router = AlertRouter(
+        min_severity=config.alert.min_severity,
+        slack_webhook=slack_webhook,
+    )
 
     analyzer = _get_analyzer(config) if not no_analyze else None
 
@@ -424,7 +423,7 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                         )
 
                         event = AlertEvent(release=release, verdict=verdict)
-                        await router.dispatch(event)
+                        await router.route(event)
 
                 except Exception as e:
                     logger.error(f"Analysis failed for {release.name}: {e}")

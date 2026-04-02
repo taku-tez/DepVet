@@ -10,6 +10,7 @@ from typing import Optional
 
 from depvet.analyzer.base import BaseAnalyzer
 from depvet.differ.chunker import DiffChunk
+from depvet.analyzer.rules import RuleMatch
 from depvet.models.verdict import (
     DiffStats,
     Finding,
@@ -66,7 +67,7 @@ class VerdictMerger:
     - summary: take summary from the most severe chunk
     """
 
-    def merge(self, raw_verdicts: list[dict], model: str, diff_stats: DiffStats, start_ms: int) -> Verdict:
+    def merge(self, raw_verdicts: list[dict], model: str, diff_stats: DiffStats, start_ms: int, rule_matches: list | None = None) -> Verdict:
         if not raw_verdicts:
             return Verdict(
                 verdict=VerdictType.UNKNOWN,
@@ -128,6 +129,36 @@ class VerdictMerger:
 
         tokens_used = sum(r.get("_tokens_used", 0) for r in raw_verdicts)
 
+        # Inject rule-based findings (if not already covered by LLM findings)
+        if rule_matches:
+            rule_keys = {(f.file, f.category.value) for f in merged_findings}
+            for rm in rule_matches:
+                key = (rm.file, rm.category.value)
+                if key not in rule_keys:
+                    merged_findings.append(Finding(
+                        category=rm.category,
+                        description=rm.description,
+                        file=rm.file,
+                        line_start=rm.line_number,
+                        line_end=rm.line_number,
+                        evidence=rm.evidence,
+                        cwe=rm.cwe,
+                        severity=rm.severity,
+                    ))
+                    rule_keys.add(key)
+
+            # Escalate verdict if rule matches are more severe
+            from depvet.analyzer.rules import RuleMatch as _RM
+            rule_severities = [rm.severity for rm in rule_matches]
+            rule_best = max(rule_severities, key=lambda s: SEVERITY_ORDER.get(s, 0))
+            if SEVERITY_ORDER.get(rule_best, 0) > SEVERITY_ORDER.get(best_severity, 0):
+                best_severity = rule_best
+
+            if rule_matches and best_verdict_type == VerdictType.BENIGN:
+                best_verdict_type = VerdictType.SUSPICIOUS
+                if any(rm.severity.value in ("CRITICAL", "HIGH") for rm in rule_matches):
+                    best_verdict_type = VerdictType.MALICIOUS
+
         return Verdict(
             verdict=best_verdict_type,
             severity=best_severity,
@@ -160,6 +191,7 @@ class DeepAnalyzer:
         new_version: str,
         ecosystem: str,
         diff_stats: DiffStats,
+        rule_matches: list | None = None,
     ) -> Verdict:
         start_ms = int(time.time() * 1000)
         total = len(chunks)
@@ -191,4 +223,5 @@ class DeepAnalyzer:
             model=self.analyzer.get_model_name(),
             diff_stats=diff_stats,
             start_ms=start_ms,
+            rule_matches=rule_matches or [],
         )
