@@ -27,6 +27,16 @@ dev = [
     "pytest-asyncio>=0.23",
     "pytest-cov>=4.0",
 ]
+vertex-claude = [
+    "anthropic[vertex]>=0.39",
+]
+vertex-gemini = [
+    "google-cloud-aiplatform[generativeai]>=1.70",
+]
+vertex = [
+    "anthropic[vertex]>=0.39",
+    "google-cloud-aiplatform[generativeai]>=1.70",
+]
 
 [project.scripts]
 depvet = "depvet.cli:cli"
