@@ -149,6 +149,10 @@ class OSVChecker:
 
         return results
 
+    def _map_ecosystem(self, ecosystem: str) -> str | None:
+        """Map DepVet ecosystem name to OSV ecosystem name."""
+        return OSV_ECOSYSTEM_MAP.get(ecosystem)
+
     def _map_severity(self, vuln: dict) -> str:
         """Map OSV severity to DepVet severity."""
         for severity in vuln.get("severity", []):

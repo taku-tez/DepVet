@@ -1,6 +1,6 @@
 from depvet.alert.router import AlertRouter
-from depvet.alert.stdout import StdoutAlert
-from depvet.alert.slack import SlackAlert
-from depvet.alert.webhook import WebhookAlert
+from depvet.alert.stdout import StdoutAlerter
+from depvet.alert.slack import SlackAlerter
+from depvet.alert.webhook import WebhookAlerter
 
-__all__ = ["AlertRouter", "StdoutAlert", "SlackAlert", "WebhookAlert"]
+__all__ = ["AlertRouter", "StdoutAlerter", "SlackAlerter", "WebhookAlerter"]

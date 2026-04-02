@@ -2,6 +2,7 @@
 
 import pytest
 from depvet.analyzer.deep import VerdictMerger
+from depvet.models.verdict import FindingCategory
 from depvet.models.verdict import DiffStats, Severity, VerdictType
 
 
@@ -84,3 +85,97 @@ def test_merge_tokens_summed():
     ]
     result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0)
     assert result.tokens_used == 300
+
+
+# ─── Rule injection into VerdictMerger ──────────────────────────────────────
+
+def test_rule_match_injected_into_findings():
+    """Rule match not covered by LLM findings should be injected."""
+    from depvet.analyzer.rules import RuleMatch
+    merger = VerdictMerger()
+    raw = [{"verdict": "SUSPICIOUS", "severity": "MEDIUM", "confidence": 0.6,
+            "findings": [], "summary": "Suspicious"}]
+    rule = RuleMatch(
+        rule_id="OS_SYSTEM",
+        category=FindingCategory.EXECUTION,
+        severity=Severity.HIGH,
+        description="os.system call detected",
+        evidence="os.system('curl')",
+        file="setup.py",
+        line_number=10,
+        cwe="CWE-78",
+    )
+    result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0,
+                          rule_matches=[rule])
+    assert len(result.findings) == 1
+    assert result.findings[0].file == "setup.py"
+    assert result.findings[0].category == FindingCategory.EXECUTION
+
+
+def test_rule_match_not_duplicated_if_already_in_llm():
+    """Rule match with same file+category as LLM finding should not duplicate."""
+    from depvet.analyzer.rules import RuleMatch
+    merger = VerdictMerger()
+    raw = [{"verdict": "MALICIOUS", "severity": "CRITICAL", "confidence": 0.9,
+            "findings": [{
+                "category": "EXECUTION", "description": "exec found",
+                "file": "setup.py", "line_start": 10, "line_end": 10,
+                "evidence": "os.system", "cwe": "CWE-78", "severity": "HIGH"
+            }], "summary": "Malicious"}]
+    rule = RuleMatch(
+        rule_id="OS_SYSTEM",
+        category=FindingCategory.EXECUTION,
+        severity=Severity.HIGH,
+        description="os.system call detected",
+        evidence="os.system('curl')",
+        file="setup.py",
+        line_number=10,
+        cwe="CWE-78",
+    )
+    result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0,
+                          rule_matches=[rule])
+    # Should not have duplicates for (setup.py, EXECUTION)
+    execution_findings = [f for f in result.findings if f.category == FindingCategory.EXECUTION and f.file == "setup.py"]
+    assert len(execution_findings) == 1
+
+
+def test_rule_critical_escalates_benign_to_malicious():
+    """BENIGN + CRITICAL rule → MALICIOUS."""
+    from depvet.analyzer.rules import RuleMatch
+    merger = VerdictMerger()
+    raw = [{"verdict": "BENIGN", "severity": "NONE", "confidence": 0.9,
+            "findings": [], "summary": "OK"}]
+    rule = RuleMatch(
+        rule_id="EXEC_BASE64",
+        category=FindingCategory.OBFUSCATION,
+        severity=Severity.CRITICAL,
+        description="base64+exec",
+        evidence="exec(b64decode(...))",
+        file="__init__.py",
+        line_number=5,
+        cwe="CWE-506",
+    )
+    result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0,
+                          rule_matches=[rule])
+    assert result.verdict == VerdictType.MALICIOUS
+
+
+def test_rule_severity_escalates_verdict_severity():
+    """Rule match with CRITICAL severity should escalate overall severity."""
+    from depvet.analyzer.rules import RuleMatch
+    merger = VerdictMerger()
+    raw = [{"verdict": "SUSPICIOUS", "severity": "LOW", "confidence": 0.5,
+            "findings": [], "summary": "Low risk"}]
+    rule = RuleMatch(
+        rule_id="HARDCODED_IP",
+        category=FindingCategory.NETWORK,
+        severity=Severity.CRITICAL,
+        description="hardcoded IP",
+        evidence="connect('1.2.3.4')",
+        file="net.py",
+        line_number=20,
+        cwe="CWE-913",
+    )
+    result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0,
+                          rule_matches=[rule])
+    assert result.severity == Severity.CRITICAL

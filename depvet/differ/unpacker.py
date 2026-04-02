@@ -23,13 +23,14 @@ def unpack(archive_path: Path, dest_dir: Path) -> Path:
 
     Returns the path to the unpacked directory.
     """
-    suffix = "".join(archive_path.suffixes).lower()
+    name_lower = archive_path.name.lower()
+    last_suffix = archive_path.suffix.lower()
 
-    if suffix in (".whl", ".zip") or archive_path.suffix.lower() in (".whl", ".zip"):
+    if last_suffix in (".whl", ".zip"):
         return _unpack_zip(archive_path, dest_dir)
-    elif suffix in (".tar.gz", ".tgz") or archive_path.name.endswith(".tar.gz"):
+    elif name_lower.endswith(".tar.gz") or last_suffix == ".tgz":
         return _unpack_tarball(archive_path, dest_dir)
-    elif archive_path.suffix.lower() == ".crate":
+    elif last_suffix == ".crate":
         # Cargo .crate files are tar.gz archives
         return _unpack_tarball(archive_path, dest_dir)
     else:

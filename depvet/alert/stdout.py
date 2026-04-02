@@ -1,127 +1,103 @@
-"""Rich console output for dependency verdicts."""
+"""Stdout alerter with Rich formatting."""
+
 from __future__ import annotations
 
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
+import json
+from typing import Optional
 
 from depvet.models.alert import AlertEvent
-from depvet.models.verdict import VerdictType, Severity
+from depvet.models.verdict import Severity, VerdictType
 
-console = Console()
+try:
+    from rich.console import Console
+    _RICH = True
+except ImportError:
+    _RICH = False
 
-_VERDICT_STYLES = {
-    VerdictType.MALICIOUS: ("bold red", "MALICIOUS RELEASE DETECTED"),
-    VerdictType.SUSPICIOUS: ("bold yellow", "SUSPICIOUS RELEASE DETECTED"),
-    VerdictType.BENIGN: ("bold green", "BENIGN RELEASE"),
-    VerdictType.UNKNOWN: ("bold dim", "UNKNOWN VERDICT"),
+console = Console() if _RICH else None  # type: ignore
+
+VERDICT_COLORS = {
+    VerdictType.MALICIOUS: "bold red",
+    VerdictType.SUSPICIOUS: "bold yellow",
+    VerdictType.BENIGN: "bold green",
+    VerdictType.UNKNOWN: "dim",
 }
 
-_SEVERITY_STYLES = {
-    Severity.CRITICAL: "bold red",
-    Severity.HIGH: "red",
-    Severity.MEDIUM: "yellow",
-    Severity.LOW: "cyan",
-    Severity.NONE: "dim",
+SEVERITY_ICONS = {
+    Severity.CRITICAL: "🚨",
+    Severity.HIGH: "⚠️",
+    Severity.MEDIUM: "🔶",
+    Severity.LOW: "🔷",
+    Severity.NONE: "✅",
+}
+
+SEVERITY_ORDER = {
+    Severity.CRITICAL: 5, Severity.HIGH: 4, Severity.MEDIUM: 3,
+    Severity.LOW: 2, Severity.NONE: 1,
 }
 
 
-class StdoutAlert:
-    """Displays formatted alert output on the terminal using Rich."""
+def format_alert_text(event: AlertEvent) -> str:
+    """Format an alert event as plain text."""
+    v = event.verdict
+    r = event.release
+    icon = SEVERITY_ICONS.get(v.severity, "")
+    lines = [
+        "━" * 40,
+        f"{icon} {v.verdict.value} RELEASE DETECTED",
+        "━" * 40,
+        f"Package   : {r.name} ({r.ecosystem.upper()})",
+        f"Version   : {r.previous_version or '(new)'} → {r.version}",
+        f"Verdict   : {v.verdict.value}",
+        f"Severity  : {v.severity.value}",
+        f"Confidence: {v.confidence:.2f}",
+        "",
+    ]
+    if v.findings:
+        lines.append("Findings:")
+        for i, f in enumerate(v.findings, 1):
+            cwe = f" ({f.cwe})" if f.cwe else ""
+            loc = f" (L{f.line_start}-L{f.line_end})" if f.line_start else ""
+            lines.append(f"  [{i}] {f.category.value}{cwe}")
+            lines.append(f"      File: {f.file}{loc}")
+            lines.append(f"      {f.description}")
+    lines.append("")
+    if v.summary:
+        lines.append("Summary:")
+        lines.append(f"  {v.summary}")
+    lines.append("")
+    lines.append(f"URL: {r.url}")
+    lines.append("━" * 40)
+    return "\n".join(lines)
 
-    def __init__(self) -> None:
-        self.console = console
 
-    def send(self, alert_event: AlertEvent) -> None:
-        """Render an alert event to stdout with Rich formatting."""
-        release = alert_event.release
-        verdict = alert_event.verdict
+class StdoutAlerter:
+    """Prints alerts to stdout using Rich (or plain text fallback)."""
 
-        style, headline = _VERDICT_STYLES.get(
-            verdict.verdict, ("bold dim", "RELEASE UPDATE")
-        )
-        severity_style = _SEVERITY_STYLES.get(verdict.severity, "dim")
+    def __init__(self, json_mode: bool = False, min_severity: str = "MEDIUM"):
+        self.json_mode = json_mode
+        self.min_severity = Severity(min_severity)
 
-        # --- Header banner ---------------------------------------------------
-        self.console.print()
-        self.console.rule(style=style)
-        self.console.print(
-            Text(f"\U0001f6a8 {headline}", style=style, justify="center")
-        )
-        self.console.rule(style=style)
+    async def send(self, event: AlertEvent) -> None:
+        if SEVERITY_ORDER.get(event.verdict.severity, 0) < SEVERITY_ORDER.get(self.min_severity, 0):
+            return
 
-        # --- Summary table ----------------------------------------------------
-        table = Table(show_header=False, box=None, padding=(0, 2))
-        table.add_column("Field", style="bold", min_width=12)
-        table.add_column("Value")
-
-        version_str = (
-            f"{release.previous_version} \u2192 {release.version}"
-            if release.previous_version
-            else release.version
-        )
-
-        table.add_row("Package", f"{release.name} ({release.ecosystem})")
-        table.add_row("Version", version_str)
-        table.add_row("Verdict", Text(verdict.verdict.value, style=style))
-        table.add_row("Severity", Text(verdict.severity.value, style=severity_style))
-        table.add_row("Confidence", f"{verdict.confidence:.2f}")
-        table.add_row("Summary", verdict.summary)
-        table.add_row("Analyzed at", verdict.analyzed_at)
-        table.add_row("Model", verdict.model)
-
-        self.console.print(table)
-
-        # --- Diff stats -------------------------------------------------------
-        ds = verdict.diff_stats
-        self.console.print()
-        self.console.print(
-            f"  [bold]Diff:[/bold]  {ds.files_changed} files changed, "
-            f"[green]+{ds.lines_added}[/green] / [red]-{ds.lines_removed}[/red]"
-        )
-
-        if ds.new_files:
-            self.console.print(f"  [bold]New files:[/bold]  {', '.join(ds.new_files)}")
-        if ds.deleted_files:
-            self.console.print(
-                f"  [bold]Deleted:[/bold]   {', '.join(ds.deleted_files)}"
-            )
-
-        # --- Findings ---------------------------------------------------------
-        if verdict.findings:
-            self.console.print()
-            findings_table = Table(
-                title="Findings",
-                title_style="bold",
-                expand=True,
-            )
-            findings_table.add_column("#", style="dim", width=3)
-            findings_table.add_column("Category", style="bold")
-            findings_table.add_column("Severity")
-            findings_table.add_column("File")
-            findings_table.add_column("Description", ratio=2)
-
-            for idx, finding in enumerate(verdict.findings, start=1):
-                f_sev_style = _SEVERITY_STYLES.get(finding.severity, "dim")
-                findings_table.add_row(
-                    str(idx),
-                    finding.category.value,
-                    Text(finding.severity.value, style=f_sev_style),
-                    finding.file,
-                    finding.description,
-                )
-
-            self.console.print(findings_table)
-
-        # --- Affected tenants -------------------------------------------------
-        if alert_event.affected_tenants:
-            self.console.print()
-            self.console.print(
-                f"  [bold]Affected tenants:[/bold]  "
-                f"{', '.join(alert_event.affected_tenants)}"
-            )
-
-        self.console.print()
-        self.console.rule(style=style)
-        self.console.print()
+        if self.json_mode:
+            print(json.dumps({
+                "package": event.release.name,
+                "version": event.release.version,
+                "ecosystem": event.release.ecosystem,
+                "previous_version": event.release.previous_version,
+                "verdict": event.verdict.verdict.value,
+                "severity": event.verdict.severity.value,
+                "confidence": event.verdict.confidence,
+                "findings_count": len(event.verdict.findings),
+                "summary": event.verdict.summary,
+                "url": event.release.url,
+            }, ensure_ascii=False, indent=2))
+        elif _RICH and console:
+            text = format_alert_text(event)
+            color = VERDICT_COLORS.get(event.verdict.verdict, "white")
+            console.print(text, style=color if event.verdict.verdict != VerdictType.BENIGN else "green")
+        else:
+            print(format_alert_text(event))
