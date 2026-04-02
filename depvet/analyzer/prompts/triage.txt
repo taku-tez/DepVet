@@ -2,18 +2,45 @@
 以下はパッケージ「{package_name}」のバージョン {old_version} から {new_version} への差分です。
 このdiffに悪意あるコードが含まれている可能性があるかを素早く判断してください。
 
-判断基準:
-- base64デコード + exec/eval の組み合わせ
-- 外部ホストへのHTTP/TCPリクエスト（公式CDNを除く）
-- 環境変数（APIキー・パスワード）の読み取り＋送信
-- setup.pyやpostinstallスクリプトでのシェルコマンド実行
-- バイナリファイルの追加または変更
-- 難読化されたコードの追加
+## 高リスクシグナル（どれか1つでも該当すればshould_analyze=true）
 
-応答は必ず以下のJSON形式のみで返してください（説明文不要）:
+**コード実行・難読化:**
+- `eval()`, `exec()`, `compile()` の新規追加
+- `base64.b64decode` + `exec/eval` の組み合わせ
+- XOR演算・ROT暗号によるデコード処理
+- `__import__`, `importlib.import_module` の動的インポート
+- `subprocess`, `os.system`, `os.popen` の新規追加
+
+**ネットワーク通信:**
+- `socket`, `urllib`, `requests`, `httpx`, `aiohttp` を使った外部接続の新規追加
+- IPアドレスのハードコード（特に非パブリックCDN/既知サービス以外）
+- DNS lookup + 接続の組み合わせ
+- WebSocket, Webhookへのデータ送信
+
+**情報窃取:**
+- `os.environ`, `os.getenv` で環境変数を読み取り、外部へ送信
+- `~/.ssh/`, `~/.aws/`, `~/.config/` 等の認証情報ファイルの読み取り
+- ブラウザのCookieやパスワードストアへのアクセス
+
+**インストール時実行:**
+- `setup.py` の `install_requires` や `cmdclass` の変更
+- `pyproject.toml` の `[tool.hatch.build.hooks]` 追加
+- `package.json` の `scripts.postinstall`, `preinstall` の変更
+- `binding.gyp` の追加や変更
+
+**バイナリ・難読化:**
+- バイナリファイルの追加（`.so`, `.dll`, `.exe`, `.bin`）
+- 長いBase64エンコード文字列の追加
+- 無意味な変数名でのコード難読化
+
+## 低リスク（以下のみの変更はshould_analyze=false）
+- コメント・ドキュメント変更のみ
+- バージョン番号のインクリメントのみ
+- テストファイルの変更のみ
+- 依存パッケージのバージョン更新のみ（ただしセキュリティ関連パッケージは要注意）
+
+応答は必ず以下のJSON形式のみで返してください（前後に説明文不要）:
 {{"should_analyze": true, "reason": "判断理由（50文字以内）"}}
-または
-{{"should_analyze": false, "reason": "判断理由（50文字以内）"}}
 
 ---
 {diff_chunk}

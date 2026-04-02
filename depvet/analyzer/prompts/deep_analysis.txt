@@ -1,22 +1,70 @@
 あなたはソフトウェアサプライチェーンセキュリティの専門家です。
 以下のdiff（チャンク {chunk_index}/{total_chunks}）を詳細に分析してください。
 
-パッケージ: {ecosystem}/{package_name}
-バージョン: {old_version} → {new_version}
+## 対象パッケージ
+- エコシステム: {ecosystem}
+- パッケージ名: {package_name}
+- バージョン変更: {old_version} → {new_version}
 
-以下の脅威カテゴリに注目して分析してください:
-1. OBFUSCATION: base64, eval, exec, XOR, unicode難読化
-2. NETWORK: 予期しない外部通信・C2パターン・DNSトンネリング
-3. PERSISTENCE: スタートアップ・cronへの書込み
-4. EXFILTRATION: 認証情報・環境変数・SSHキーの外部送信
-5. EXECUTION: subprocess・os.system・動的インポート
-6. STEGANOGRAPHY: メディアファイルへのペイロード埋め込み
-7. TYPOSQUATTING: 人気パッケージへの類似命名
-8. DEPENDENCY_CONFUSION: プライベートパッケージ名の詐称
-9. BUILD_HOOK_ABUSE: setup.py・install_requires・postinstallの悪用
-10. METADATA_MANIPULATION: maintainer・license情報の改ざん
+## 分析する脅威カテゴリ
 
-応答は必ず以下のJSON形式のみで返してください（日本語で、説明文不要）:
+1. **OBFUSCATION** (CWE-506): 難読化されたコード
+   - base64/hex/XOR/ROT によるデコード処理
+   - eval/exec による動的コード実行
+   - 無意味な変数名や意図的な可読性低下
+
+2. **NETWORK** (CWE-913): 予期しない外部通信
+   - C2サーバーへの接続パターン
+   - DNSトンネリング
+   - ハードコードされたIPアドレスへの通信
+   - 既知サービス（PyPI/npm API等）以外へのHTTP/S通信
+
+3. **PERSISTENCE** (CWE-693): 永続化
+   - cron/systemd/launchd/レジストリへの書き込み
+   - スタートアップスクリプトの変更
+   - シェルプロファイル（.bashrc/.zshrc等）の変更
+
+4. **EXFILTRATION** (CWE-200): 機密情報の外部送信
+   - 環境変数（APIキー・シークレット）の読み取りと送信
+   - SSHキー・GPGキーへのアクセス
+   - クラウドクレデンシャル（AWS/GCP/Azure）
+   - ブラウザパスワードストア
+
+5. **EXECUTION** (CWE-78): 任意コード実行
+   - subprocess/os.system/os.popen の不審な使用
+   - シェルインジェクションの可能性
+   - ファイルパーミッション変更 (chmod +x)
+
+6. **STEGANOGRAPHY** (CWE-116): ペイロード隠蔽
+   - 画像・音声・バイナリファイルへのデータ埋め込み
+   - コメント内の隠しコード
+
+7. **TYPOSQUATTING** (CWE-1021): タイポスクワッティング
+   - メタデータが人気パッケージに類似（名前・説明文）
+   - 別パッケージへの偽装
+
+8. **DEPENDENCY_CONFUSION** (CWE-1021): 依存関係混乱攻撃
+   - 内部パッケージ名を使ったパブリックパッケージ
+   - 内部ネームスペースの詐称
+
+9. **BUILD_HOOK_ABUSE** (CWE-829): ビルドフック悪用
+   - setup.py の install コマンド内でのシェル実行
+   - postinstall/preinstall スクリプトの悪用
+   - pyproject.toml の hatch/flit build hooks
+
+10. **METADATA_MANIPULATION** (CWE-345): メタデータ改ざん
+    - maintainer/author 情報の不審な変更
+    - license の変更
+    - homepage/repository URLの変更
+
+## 重要な注意事項
+- diffの「+」行（追加）に注目してください
+- 削除された悪意あるコード（「-」行）も記録してください（過去バージョンの問題として）
+- テストファイルやドキュメントの変更は低優先度
+- 公式APIクライアントコード（PyPI/npm API呼び出し等）は通常問題なし
+
+## 出力フォーマット
+応答は必ず以下のJSON形式のみで返してください（前後に説明文・```記号不要、日本語で）:
 {{
   "verdict": "MALICIOUS",
   "severity": "CRITICAL",
@@ -24,11 +72,11 @@
   "findings": [
     {{
       "category": "EXFILTRATION",
-      "description": "詳細説明（日本語・100文字以内）",
-      "file": "ファイルパス",
+      "description": "AWS_SECRET_ACCESS_KEYを103.45.67.89:8080に送信するコードが追加された",
+      "file": "requests/auth.py",
       "line_start": 42,
       "line_end": 67,
-      "evidence": "証拠コード断片（50文字以内）",
+      "evidence": "os.environ.get('AWS_SECRET')",
       "cwe": "CWE-200",
       "severity": "CRITICAL"
     }}
@@ -36,9 +84,13 @@
   "summary": "総合評価（日本語・200文字以内）"
 }}
 
-verdictは "MALICIOUS", "SUSPICIOUS", "BENIGN", "UNKNOWN" のいずれか。
-severityは "CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE" のいずれか。
-findingsが空の場合は空配列 [] を返してください。
+**verdict の選択基準:**
+- MALICIOUS: 悪意あるコードが確実に存在する
+- SUSPICIOUS: 怪しいが確実でない、または意図が不明
+- BENIGN: 問題なし
+- UNKNOWN: diffが不十分で判断できない
+
+**findingsが空の場合は空配列 [] を返すこと**
 
 ---
 {diff_chunk}
