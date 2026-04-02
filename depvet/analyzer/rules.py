@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from depvet.models.verdict import FindingCategory, Severity
+from depvet.analyzer.extended_rules import EXTENDED_PATTERNS as _EXTENDED
 
 
 @dataclass
@@ -373,7 +374,7 @@ MALICIOUS_PATTERNS: list[dict] = [
         "cwe": "CWE-400",
     },
 
-]
+] + _EXTENDED  # Type 7/8/10 patterns
 
 # Patterns that suggest a diff is likely benign (skip LLM)
 BENIGN_INDICATORS = [
