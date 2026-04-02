@@ -33,7 +33,7 @@ def test_load_config_from_toml():
         import tomllib
     except ImportError:
         try:
-            import tomli as tomllib
+            import tomli as tomllib  # noqa: F401
         except ImportError:
             pytest.skip("tomllib not available")
 

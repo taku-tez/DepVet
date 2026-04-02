@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import sys
@@ -127,7 +126,7 @@ async def _scan(config, package, old_version, new_version, ecosystem, json_outpu
         (tmp / "new").mkdir(parents=True, exist_ok=True)
 
         if not old_archive or not new_archive:
-            click.echo(f"❌ Failed to download one or both versions", err=True)
+            click.echo("❌ Failed to download one or both versions", err=True)
             sys.exit(1)
 
         click.echo("  Unpacking...")
@@ -223,7 +222,8 @@ async def _diff(config, package, old_version, new_version, ecosystem, output):
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
-        (tmp / "old").mkdir(); (tmp / "new").mkdir()
+        (tmp / "old").mkdir()
+        (tmp / "new").mkdir()
 
         old_archive = await download_package(package, old_version, ecosystem, tmp / "old")
         new_archive = await download_package(package, new_version, ecosystem, tmp / "new")
@@ -329,13 +329,10 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
     from depvet.registry.npm import NpmMonitor
     from depvet.registry.state import PollingState
     from depvet.watchlist.manager import WatchlistManager
-    from depvet.watchlist.top_n import TopNSource
     from depvet.alert.router import AlertRouter
     from depvet.analyzer.triage import TriageAnalyzer
     from depvet.analyzer.deep import DeepAnalyzer
     from depvet.models.alert import AlertEvent
-    from depvet.models.package import Release
-    import time
 
     state = PollingState(config.state.path)
     wl = WatchlistManager()
@@ -355,7 +352,6 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
         sys.exit(1)
 
     # Load top-N watchlist
-    top_n_source = TopNSource()
     if top > 0:
         for mon in monitors:
             click.echo(f"  Loading top-{top} {mon.ecosystem} packages...")
@@ -402,12 +398,12 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                         from depvet.differ.downloader import download_package
                         from depvet.differ.unpacker import unpack
                         from depvet.differ.diff_generator import generate_diff
-                        from depvet.models.verdict import DiffStats
 
                         if not release.previous_version:
                             continue
 
-                        (tmp / "old").mkdir(); (tmp / "new").mkdir()
+                        (tmp / "old").mkdir()
+                        (tmp / "new").mkdir()
                         old_arch = await download_package(release.name, release.previous_version, eco, tmp / "old")
                         new_arch = await download_package(release.name, release.version, eco, tmp / "new")
                         if not old_arch or not new_arch:
@@ -421,7 +417,7 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                             continue
 
                         triage = TriageAnalyzer(analyzer)
-                        should, reason = await triage.should_analyze(
+                        should, reason, _rule_matches = await triage.should_analyze(
                             chunks, release.name, release.previous_version, release.version
                         )
                         if not should:
@@ -438,7 +434,7 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                         )
 
                         event = AlertEvent(release=release, verdict=verdict)
-                        await router.route(event)
+                        await router.dispatch(event)
 
                 except Exception as e:
                     logger.error(f"Analysis failed for {release.name}: {e}")

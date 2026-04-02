@@ -1,14 +1,13 @@
 """Tests for AST-based static analysis."""
 
-import pytest
-from depvet.analyzer.ast_scan import ast_scan_diff, ASTFinding
+from depvet.analyzer.ast_scan import ast_scan_diff
 from depvet.models.verdict import Severity
 
 
 def make_diff(lines: list[str], filepath: str = "test.py") -> str:
     return "\n".join(
         [f"--- a/{filepath}", f"+++ b/{filepath}", "@@ -1 +1,{len(lines)} @@"]
-        + [f"+{l}" for l in lines]
+        + [f"+{line}" for line in lines]
     )
 
 

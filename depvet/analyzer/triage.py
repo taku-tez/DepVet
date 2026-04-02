@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from typing import Optional
 
 from depvet.analyzer.base import BaseAnalyzer
 from depvet.analyzer.rules import scan_diff_full, is_likely_benign, RuleMatch

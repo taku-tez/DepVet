@@ -1,8 +1,7 @@
 """Tests for rule-based malicious pattern detection."""
 
-import pytest
-from depvet.analyzer.rules import scan_diff, is_likely_benign, RuleMatch
-from depvet.models.verdict import FindingCategory, Severity
+from depvet.analyzer.rules import scan_diff, is_likely_benign
+from depvet.models.verdict import Severity
 
 
 def make_diff(added_lines: list[str], filepath: str = "test.py") -> str:

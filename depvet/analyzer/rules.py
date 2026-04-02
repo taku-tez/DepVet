@@ -342,7 +342,7 @@ def scan_diff(diff_content: str, filepath: str = "") -> list[RuleMatch]:
             current_line += 1
 
     # Scan added content
-    added_content = "\n".join(l for _, l in added_lines)
+    added_content = "\n".join(line for _, line in added_lines)
 
     for pattern_def in MALICIOUS_PATTERNS:
         for m in pattern_def["pattern"].finditer(added_content):
@@ -501,7 +501,7 @@ def scan_diff_windowed(diff_content: str, filepath: str = "") -> list[RuleMatch]
     if not added_lines:
         return matches
 
-    lines_only = [l for _, l in added_lines]
+    lines_only = [line for _, line in added_lines]
 
     for pattern_def in WINDOW_PATTERNS:
         window = pattern_def["window"]

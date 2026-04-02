@@ -1,6 +1,5 @@
 """Tests for priority file control."""
 
-import pytest
 from depvet.differ.priority import is_priority, should_skip, priority_sort_key
 
 

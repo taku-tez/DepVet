@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional
 
 from depvet.differ.chunker import DiffChunk
-from depvet.models.verdict import Verdict
 
 
 class BaseAnalyzer(ABC):

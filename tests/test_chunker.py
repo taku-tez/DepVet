@@ -1,7 +1,6 @@
 """Tests for DiffChunker."""
 
-import pytest
-from depvet.differ.chunker import DiffChunker, DiffFile, DiffChunk
+from depvet.differ.chunker import DiffChunker, DiffFile
 
 
 def make_file(path: str, content: str = "x" * 100, binary: bool = False) -> DiffFile:

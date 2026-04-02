@@ -1,7 +1,5 @@
 """Comprehensive alert tests — Slack, Webhook, router edge cases."""
 
-import hashlib
-import hmac
 import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -205,7 +203,6 @@ class TestSlackAlerter:
 
     @pytest.mark.asyncio
     async def test_posts_to_webhook_url(self):
-        import aiohttp
         posted = []
 
         class MockResponse:

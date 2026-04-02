@@ -3,8 +3,6 @@
 import json
 import os
 import tempfile
-import pytest
-from pathlib import Path
 
 from depvet.watchlist.explicit import ExplicitSource
 from depvet.watchlist.manager import WatchlistManager

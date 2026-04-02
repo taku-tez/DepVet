@@ -4,14 +4,13 @@ import pytest
 from depvet.analyzer.rules import (
     scan_diff_full,
     scan_diff_windowed,
-    WINDOW_PATTERNS,
 )
 from depvet.models.verdict import Severity
 
 
 def make_diff(lines: list[str], filepath: str = "test.py") -> str:
     header = [f"--- a/{filepath}", f"+++ b/{filepath}", "@@ -1,1 +1,{len(lines)} @@"]
-    return "\n".join(header + [f"+{l}" for l in lines])
+    return "\n".join(header + [f"+{line}" for line in lines])
 
 
 # ─── BASE64_EXEC_CHAIN ────────────────────────────────────────────────────────

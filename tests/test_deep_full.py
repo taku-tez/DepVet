@@ -1,6 +1,5 @@
 """Comprehensive DeepAnalyzer and VerdictMerger tests."""
 
-import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 

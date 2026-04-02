@@ -1,9 +1,7 @@
 """Tests for known-bad database."""
 
-import json
 import os
 import tempfile
-import pytest
 from pathlib import Path
 
 from depvet.known_bad.database import KnownBadDB, KnownBadEntry

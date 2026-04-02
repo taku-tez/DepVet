@@ -1,6 +1,5 @@
 """Comprehensive rules engine tests — all 23 single-line + 5 window patterns."""
 
-import pytest
 from depvet.analyzer.rules import (
     scan_diff, scan_diff_windowed, scan_diff_full,
     MALICIOUS_PATTERNS, WINDOW_PATTERNS, SEVERITY_ORDER_RULES,
@@ -11,7 +10,7 @@ from depvet.models.verdict import Severity, FindingCategory
 
 def make_diff(lines: list[str], path: str = "test.py") -> str:
     header = [f"--- a/{path}", f"+++ b/{path}", f"@@ -1 +1,{len(lines)} @@"]
-    return "\n".join(header + [f"+{l}" for l in lines])
+    return "\n".join(header + [f"+{line}" for line in lines])
 
 
 # ─── All single-line patterns ────────────────────────────────────────────────

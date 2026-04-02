@@ -1,12 +1,11 @@
 """Tests for version transition signals."""
 
-import pytest
 from depvet.analyzer.version_signal import (
     VersionTransitionContext,
     VersionSignal,
 )
 from depvet.analyzer.deep import VerdictMerger
-from depvet.models.verdict import DiffStats, Severity, VerdictType
+from depvet.models.verdict import DiffStats, VerdictType
 
 
 def make_stats():

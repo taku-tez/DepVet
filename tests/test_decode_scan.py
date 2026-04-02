@@ -1,14 +1,13 @@
 """Tests for base64/hex decode and re-scan."""
 
 import base64
-import pytest
 from depvet.analyzer.decode_scan import decode_and_scan, _try_decode_b64, _try_decode_hex
 
 
 def make_diff(lines: list[str], filepath: str = "evil.py") -> str:
     return "\n".join(
         [f"--- a/{filepath}", f"+++ b/{filepath}", "@@ -1 +1,5 @@"]
-        + [f"+{l}" for l in lines]
+        + [f"+{line}" for line in lines]
     )
 
 
@@ -34,7 +33,7 @@ def test_decode_b64_binary_returns_none():
     import struct
     encoded = base64.b64encode(struct.pack("I" * 10, *range(10))).decode()
     # Binary data may decode to garbage — should be filtered
-    result = _try_decode_b64(encoded)
+    _try_decode_b64(encoded)
     # Either None or non-printable (not tested strictly — depends on content)
 
 

@@ -10,7 +10,6 @@ from typing import Optional
 
 from depvet.analyzer.base import BaseAnalyzer
 from depvet.differ.chunker import DiffChunk
-from depvet.analyzer.rules import RuleMatch
 from depvet.analyzer.version_signal import VersionTransitionContext
 from depvet.models.verdict import (
     DiffStats,
@@ -149,7 +148,6 @@ class VerdictMerger:
                     rule_keys.add(key)
 
             # Escalate verdict if rule matches are more severe
-            from depvet.analyzer.rules import RuleMatch as _RM
             rule_severities = [rm.severity for rm in rule_matches]
             rule_best = max(rule_severities, key=lambda s: SEVERITY_ORDER.get(s, 0))
             if SEVERITY_ORDER.get(rule_best, 0) > SEVERITY_ORDER.get(best_severity, 0):

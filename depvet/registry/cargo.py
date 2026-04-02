@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Optional
 
 import aiohttp
 
@@ -88,7 +87,6 @@ class CargoMonitor(BaseRegistryMonitor):
 
     async def load_top_n(self, n: int) -> list[str]:
         """Load top N crates by recent downloads from crates.io."""
-        url = f"{CRATES_IO_API}/crates?sort=downloads&per_page={min(n, 100)}"
         try:
             async with aiohttp.ClientSession(headers=self._headers()) as session:
                 page = 1

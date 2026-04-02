@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 import aiohttp
@@ -139,10 +139,8 @@ async def analyze_pypi_transition(
     # --- Signal: Maintainer change ---
     old_info = await _get_version_info_pypi(name, old_version)
     new_info_author = info.get("author", "")
-    new_info_email = info.get("author_email", "")
     if old_info:
         old_author = old_info.get("author", "")
-        old_email = old_info.get("author_email", "")
         if old_author and new_info_author and old_author != new_info_author:
             ctx.maintainer_changed = True
             ctx.signals.append(VersionSignal(
@@ -339,7 +337,6 @@ async def analyze_diff_stats_signals(
 
     total_added = diff_stats.lines_added
     total_removed = diff_stats.lines_removed
-    files_changed = diff_stats.files_changed
     new_files = diff_stats.new_files
     deleted_files = diff_stats.deleted_files
     binary_files = diff_stats.binary_files

@@ -4,7 +4,6 @@ import json
 import os
 import tempfile
 import pytest
-from pathlib import Path
 
 from securify_plugin.watchlist_sync import WatchlistSyncJob
 from securify_plugin.plugin import DepVetSecurifyPlugin

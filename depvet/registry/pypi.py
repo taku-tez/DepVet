@@ -6,7 +6,6 @@ import asyncio
 import logging
 import xmlrpc.client
 from datetime import datetime, timezone
-from typing import Optional
 
 import aiohttp
 

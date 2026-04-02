@@ -1,13 +1,12 @@
 """Comprehensive triage pipeline tests — covers all 4 phases + edge cases."""
 
-import base64
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from depvet.analyzer.triage import TriageAnalyzer
 from depvet.analyzer.base import BaseAnalyzer
 from depvet.differ.chunker import DiffChunk, DiffFile
-from depvet.models.verdict import FindingCategory, Severity
+from depvet.models.verdict import Severity
 
 
 def make_chunk(files: list[DiffFile], idx: int = 0) -> DiffChunk:

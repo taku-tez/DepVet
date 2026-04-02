@@ -1,6 +1,5 @@
 """Tests for VerdictMerger."""
 
-import pytest
 from depvet.analyzer.deep import VerdictMerger
 from depvet.models.verdict import FindingCategory
 from depvet.models.verdict import DiffStats, Severity, VerdictType

@@ -237,7 +237,7 @@ def decode_and_scan(diff_content: str, filepath: str = "") -> list[DecodedPayloa
                     file=filepath,
                     line_number=line_num,
                     severity=Severity.HIGH,
-                    description=f"ROT13エンコードされた行に悪意あるパターンが検出された",
+                    description="ROT13エンコードされた行に悪意あるパターンが検出された",
                     category=FindingCategory.OBFUSCATION,
                     sub_findings=sub,
                 ))

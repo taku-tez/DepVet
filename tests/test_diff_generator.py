@@ -3,7 +3,6 @@
 import tempfile
 from pathlib import Path
 
-import pytest
 
 from depvet.differ.diff_generator import generate_diff, format_diff_markdown
 

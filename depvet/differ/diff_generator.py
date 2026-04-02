@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import difflib
 import logging
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -116,8 +115,8 @@ def generate_diff(
         if not diff_lines and not is_new and not is_deleted:
             continue
 
-        added = sum(1 for l in diff_lines if l.startswith("+") and not l.startswith("+++"))
-        removed = sum(1 for l in diff_lines if l.startswith("-") and not l.startswith("---"))
+        added = sum(1 for ln in diff_lines if ln.startswith("+") and not ln.startswith("+++"))
+        removed = sum(1 for ln in diff_lines if ln.startswith("-") and not ln.startswith("---"))
         stats.lines_added += added
         stats.lines_removed += removed
         if diff_lines or is_new or is_deleted:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 from depvet.models.alert import AlertEvent
 from depvet.models.verdict import Severity, VerdictType

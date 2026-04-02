@@ -26,7 +26,7 @@ from __future__ import annotations
 import ast
 import re
 import textwrap
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from depvet.models.verdict import FindingCategory, Severity

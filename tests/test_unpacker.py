@@ -1,7 +1,6 @@
 """Tests for archive unpacker."""
 
 import io
-import os
 import tarfile
 import tempfile
 import zipfile

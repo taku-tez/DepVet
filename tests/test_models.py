@@ -1,6 +1,5 @@
 """Tests for data models."""
 
-import pytest
 from depvet.models.verdict import (
     VerdictType, Severity, FindingCategory, Finding, DiffStats, Verdict
 )

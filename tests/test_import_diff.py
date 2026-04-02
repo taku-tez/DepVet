@@ -1,6 +1,5 @@
 """Tests for import diff analyzer."""
 
-import pytest
 from depvet.analyzer.import_diff import (
     analyze_imports,
     import_signals_to_context,
@@ -12,7 +11,7 @@ from depvet.analyzer.import_diff import (
 def make_diff(lines: list[str], filepath: str = "test.py") -> str:
     return "\n".join(
         [f"--- a/{filepath}", f"+++ b/{filepath}", "@@ -1,1 +1,5 @@"]
-        + [f"+{l}" for l in lines]
+        + [f"+{line}" for line in lines]
     )
 
 

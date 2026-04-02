@@ -1,9 +1,7 @@
 """Comprehensive diff_generator tests — binary detection, edge cases, chunking."""
 
-import tempfile
 from pathlib import Path
 
-import pytest
 
 from depvet.differ.diff_generator import (
     generate_diff,
@@ -12,7 +10,6 @@ from depvet.differ.diff_generator import (
     _read_lines,
     _collect_files,
 )
-from depvet.differ.chunker import DiffChunker
 
 
 def _create_pkg(base: Path, files: dict[str, bytes | str]) -> Path:
