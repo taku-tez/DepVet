@@ -44,8 +44,11 @@ class LLMConfig(BaseSettings):
     triage_model: str = DEFAULT_TRIAGE_MODEL
     max_tokens: int = DEFAULT_MAX_TOKENS
     timeout: int = DEFAULT_LLM_TIMEOUT
+    # Vertex AI
+    vertex_project_id: Optional[str] = Field(default=None, alias="VERTEX_PROJECT_ID")
+    vertex_region: Optional[str] = Field(default="us-east5", alias="VERTEX_REGION")
 
-    model_config = {"env_prefix": "DEPVET_LLM_", "extra": "ignore"}
+    model_config = {"env_prefix": "DEPVET_LLM_", "extra": "ignore", "populate_by_name": True}
 
 
 class MonitorConfig(BaseSettings):

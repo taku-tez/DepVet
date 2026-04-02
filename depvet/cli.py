@@ -35,9 +35,17 @@ def _setup_logging(verbose: bool) -> None:
 
 
 def _get_analyzer(config):
-    """Create analyzer from config."""
+    """Create analyzer from config.
+
+    Supported providers (DEPVET_LLM_PROVIDER):
+      anthropic          — Anthropic API (default)
+      openai             — OpenAI API
+      vertex-claude      — Claude on Vertex AI (requires VERTEX_PROJECT_ID)
+      vertex-gemini      — Gemini on Vertex AI (requires VERTEX_PROJECT_ID)
+    """
     from depvet.analyzer.claude import ClaudeAnalyzer
     from depvet.analyzer.openai import OpenAIAnalyzer
+    from depvet.analyzer.vertexai import VertexClaudeAnalyzer, VertexGeminiAnalyzer
 
     provider = config.llm.provider.lower()
     api_key = os.environ.get(config.llm.api_key_env)
@@ -49,7 +57,24 @@ def _get_analyzer(config):
             api_key=api_key,
             max_tokens=config.llm.max_tokens,
         )
+    elif provider in ("vertex-claude", "vertexai-claude", "vertex_claude"):
+        return VertexClaudeAnalyzer(
+            model=config.llm.model or VertexClaudeAnalyzer.DEFAULT_MODEL,
+            triage_model=config.llm.triage_model or VertexClaudeAnalyzer.DEFAULT_TRIAGE_MODEL,
+            project_id=os.environ.get("VERTEX_PROJECT_ID"),
+            region=os.environ.get("VERTEX_REGION"),
+            max_tokens=config.llm.max_tokens,
+        )
+    elif provider in ("vertex-gemini", "vertexai-gemini", "vertex_gemini", "gemini"):
+        return VertexGeminiAnalyzer(
+            model=config.llm.model or VertexGeminiAnalyzer.DEFAULT_MODEL,
+            triage_model=config.llm.triage_model or VertexGeminiAnalyzer.DEFAULT_TRIAGE_MODEL,
+            project_id=os.environ.get("VERTEX_PROJECT_ID"),
+            region=os.environ.get("VERTEX_REGION"),
+            max_tokens=config.llm.max_tokens,
+        )
     else:
+        # Default: Anthropic direct API
         return ClaudeAnalyzer(
             model=config.llm.model,
             triage_model=config.llm.triage_model,
