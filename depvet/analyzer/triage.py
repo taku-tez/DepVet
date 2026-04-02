@@ -12,6 +12,7 @@ from depvet.analyzer.import_diff import analyze_imports
 from depvet.analyzer.decode_scan import decode_and_scan
 from depvet.analyzer.ast_scan import ast_scan_diff
 from depvet.differ.chunker import DiffChunk
+from depvet.models.verdict import FindingCategory, Severity
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,6 @@ class TriageAnalyzer:
                         # Convert import signals to RuleMatch-like objects
                         for sig in import_signals:
                             if sig.severity in ("CRITICAL", "HIGH"):
-                                from depvet.models.verdict import Severity as _Sev, FindingCategory as _FC
                                 all_rule_matches.append(RuleMatch(
                                     rule_id=f"IMPORT_{sig.module.upper().replace('.', '_')}",
                                     category=FindingCategory.EXECUTION,
@@ -89,7 +89,6 @@ class TriageAnalyzer:
                     if decoded_hits:
                         critical_decoded = [d for d in decoded_hits if d.severity == Severity.CRITICAL]
                         if critical_decoded:
-                            from depvet.models.verdict import Severity, FindingCategory
                             for d in critical_decoded:
                                 all_rule_matches.append(RuleMatch(
                                     rule_id="DECODED_PAYLOAD_CRITICAL",
@@ -110,7 +109,6 @@ class TriageAnalyzer:
                     ast_findings = ast_scan_diff(f.content, f.path)
                     critical_ast = [a for a in ast_findings if a.severity.value == "CRITICAL"]
                     if critical_ast:
-                        from depvet.models.verdict import Severity
                         for a in critical_ast:
                             all_rule_matches.append(RuleMatch(
                                 rule_id=a.finding_id,
@@ -137,9 +135,13 @@ class TriageAnalyzer:
             return True, f"ルールエンジン(HIGH): {high_rules[0].description}", all_rule_matches
 
         # ── Phase 5: LLM triage as final arbiter ───────────────────────────
-        should, reason = await self.analyzer.triage(
-            chunks[0], package_name, old_version, new_version
-        )
+        try:
+            should, reason = await self.analyzer.triage(
+                chunks[0], package_name, old_version, new_version
+            )
+        except Exception as e:
+            logger.warning(f"LLM triage failed, defaulting to analyze: {e}")
+            return True, f"LLM triage error (fail-safe): {e}", all_rule_matches
         if should:
             return True, reason, all_rule_matches
 
