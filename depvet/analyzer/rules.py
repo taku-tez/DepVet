@@ -316,6 +316,63 @@ MALICIOUS_PATTERNS: list[dict] = [
         "description": "リバースシェルのパターンが検出された",
         "cwe": "CWE-78",
     },
+
+    # ── Type 5: Intentional sabotage patterns ─────────────────────────────────
+    # Mass file destruction: glob/walk + write/delete (node-ipc/peacenotwar)
+    {
+        "id": "MASS_FILE_OVERWRITE",
+        "pattern": re.compile(
+            r"(?:glob\.sync|readdirSync|fs\.readdir|os\.walk|glob\()"
+            r".{0,200}"
+            r"(?:writeFileSync|write_text|\.write\s*\(|fs\.unlink|os\.remove)",
+            re.IGNORECASE | re.DOTALL,
+        ),
+        "category": FindingCategory.EXECUTION,
+        "severity": Severity.CRITICAL,
+        "description": "ファイル一覧取得と一括書込み/削除の組み合わせが検出された（ファイル大量破壊パターン）",
+        "cwe": "CWE-732",
+    },
+    # IP/CIDR-based conditional destruction (node-ipc)
+    {
+        "id": "IP_BASED_CONDITIONAL_EXEC",
+        "pattern": re.compile(
+            r"(?:cidr|ipaddr|ip\.address\(\)|geoip|ipinfo\.io)"
+            r".{0,200}"
+            r"(?:exec|writeFile|unlink|rmdir|system\()",
+            re.IGNORECASE | re.DOTALL,
+        ),
+        "category": FindingCategory.EXECUTION,
+        "severity": Severity.CRITICAL,
+        "description": "IPアドレス判定と処理実行の組み合わせが検出された（地理的条件付き破壊パターン）",
+        "cwe": "CWE-693",
+    },
+    # Overwriting files with peace/political string (peacenotwar style)
+    {
+        "id": "POLITICAL_STRING_OVERWRITE",
+        "pattern": re.compile(
+            r"(?:writeFileSync|write_text|open\(.+['\"]w['\"])"
+            r"[^)]{0,100}"
+            r"(?:peace|PEACE|NO WAR|love|heart)",
+            re.IGNORECASE | re.DOTALL,
+        ),
+        "category": FindingCategory.EXECUTION,
+        "severity": Severity.HIGH,
+        "description": "政治的メッセージによるファイル上書きパターンが検出された（peacenotwar型破壊）",
+        "cwe": "CWE-732",
+    },
+    # unconditional non-zero process.exit (crash injection)
+    {
+        "id": "CRASH_INJECTION",
+        "pattern": re.compile(
+            r"(?:process\.exit|sys\.exit|os\._exit)\s*\(\s*[1-9]",
+            re.IGNORECASE,
+        ),
+        "category": FindingCategory.EXECUTION,
+        "severity": Severity.MEDIUM,
+        "description": "非ゼロ終了コードでのプロセス強制終了が追加された（クラッシュ注入の可能性）",
+        "cwe": "CWE-400",
+    },
+
 ]
 
 # Patterns that suggest a diff is likely benign (skip LLM)

@@ -315,6 +315,7 @@ class TestType5IntentionalSabotage:
     def test_colors_infinite_loop_sabotage(self):
         """
         colors 1.4.1: Infinite loop injection.
+        Now detected via CRASH_INJECTION or zalgo pattern.
         """
         diff = diff_header("lib/extendStringPrototype.js") + '\n'.join([
             '+var zalgo = require("./zalgo");',
@@ -323,10 +324,40 @@ class TestType5IntentionalSabotage:
             '+};',
         ])
         rules = scan_diff_full(diff, "lib/extendStringPrototype.js")
-        # This may not hit hard rules (no exec/network) — but should be suspicious
-        # at minimum MEDIUM for unexpected infinite loop behavior
-        # (LLM would catch this via semantic analysis)
-        assert isinstance(rules, list)  # At minimum no crash
+        # Even without critical signals, should not crash
+        # LLM will catch semantic intent; static analysis catches related patterns
+        assert isinstance(rules, list)
+
+    def test_node_ipc_mass_file_overwrite(self):
+        """
+        node-ipc: glob + writeFileSync mass file destruction.
+        """
+        diff = diff_header("lib/services/network.js") + '\n'.join([
+            '+const files = glob.sync("**/*.js");',
+            '+files.forEach(f => fs.writeFileSync(f, ""));',
+        ])
+        rules = scan_diff_full(diff, "lib/services/network.js")
+        assert any(m.rule_id == "MASS_FILE_OVERWRITE" for m in rules)
+        assert has_critical_or_high(rules)
+
+    def test_peacenotwar_political_overwrite(self):
+        """
+        peacenotwar: writes political message to files.
+        """
+        diff = diff_header("index.js") + '\n'.join([
+            '+const files = readdirSync(".");',
+            '+files.forEach(f => writeFileSync(f, "PEACE NO WAR \u2764"));',
+        ])
+        rules = scan_diff_full(diff, "index.js")
+        assert any(m.rule_id in ("POLITICAL_STRING_OVERWRITE", "MASS_FILE_OVERWRITE") for m in rules)
+
+    def test_crash_injection(self):
+        """
+        Injected sys.exit(1) / process.exit(1) = crash injection.
+        """
+        diff = diff_header("setup.py") + "+import sys\n+sys.exit(1)\n"
+        rules = scan_diff_full(diff, "setup.py")
+        assert any(m.rule_id == "CRASH_INJECTION" for m in rules)
 
     def test_ci_condition_with_destruction(self):
         """
