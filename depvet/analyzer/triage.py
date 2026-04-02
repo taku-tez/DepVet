@@ -9,6 +9,7 @@ from depvet.analyzer.rules import scan_diff_full, is_likely_benign, RuleMatch
 from depvet.analyzer.import_diff import analyze_imports
 from depvet.analyzer.decode_scan import decode_and_scan
 from depvet.analyzer.ast_scan import ast_scan_diff
+from depvet.analyzer.dep_extractor import extract_new_dependencies, deps_to_watchlist_entries
 from depvet.differ.chunker import DiffChunk
 from depvet.models.verdict import FindingCategory, Severity
 
@@ -78,6 +79,48 @@ class TriageAnalyzer:
                                 ))
                         if any(s.severity == "CRITICAL" for s in import_signals):
                             return True, f"新規危険インポート検出: {import_signals[0].module}", all_rule_matches
+
+        # ── Phase 2.5: Dependency manifest check ──────────────────────────
+        # Detect newly added dependencies (e.g., axios attack: plain-crypto-js injected)
+        for chunk in chunks:
+            for f in chunk.files:
+                if not f.is_binary and f.content:
+                    fname = f.path.lower()
+                    if any(m in fname for m in ("package.json", "pyproject.toml", "setup.cfg", "requirements")):
+                        new_deps = extract_new_dependencies(f.content, f.path)
+                        if new_deps:
+                            # Check against Known-bad DB
+                            from depvet.known_bad.database import KnownBadDB
+                            db = KnownBadDB()
+                            for dep in new_deps:
+                                hit = db.lookup(dep.name, dep.version_spec.lstrip("^~>=<"), dep.ecosystem)
+                                if hit:
+                                    all_rule_matches.append(RuleMatch(
+                                        rule_id="KNOWN_BAD_DEP_INJECTED",
+                                        category=FindingCategory.DEPENDENCY_CONFUSION,
+                                        severity=Severity.CRITICAL,
+                                        description=f"既知の悪意あるパッケージ '{dep.name}@{dep.version_spec}' が依存として追加された: {hit.summary}",
+                                        evidence=f"{dep.name}: {dep.version_spec}",
+                                        file=f.path,
+                                        line_number=dep.line_number,
+                                        cwe="CWE-829",
+                                    ))
+                                    return True, f"Known-bad依存追加検出: {dep.name}@{dep.version_spec}", all_rule_matches
+
+                            # Even if not in Known-bad DB, flag suspicious unknown deps
+                            unknown_deps = deps_to_watchlist_entries(new_deps)
+                            if unknown_deps:
+                                for dep_name, dep_eco in unknown_deps[:3]:
+                                    all_rule_matches.append(RuleMatch(
+                                        rule_id="UNKNOWN_DEP_ADDED",
+                                        category=FindingCategory.DEPENDENCY_CONFUSION,
+                                        severity=Severity.MEDIUM,
+                                        description=f"未知の依存パッケージ '{dep_name}' が追加された（サプライチェーン攻撃の典型パターン）",
+                                        evidence=f"new dep: {dep_name}",
+                                        file=f.path,
+                                        line_number=None,
+                                        cwe="CWE-1021",
+                                    ))
 
         # ── Phase 3: Base64/hex decode scan ────────────────────────────────
         for chunk in chunks:

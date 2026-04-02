@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-04-02T00:00:00+00:00",
+  "updated_at": "2026-04-02T08:55:45.230213+00:00",
   "entries": [
     {
       "name": "ctx",
@@ -372,6 +372,42 @@
       "reported_at": "2022-08-01",
       "cve": null,
       "osv_id": null
+    },
+    {
+      "name": "axios",
+      "version": "1.14.1",
+      "ecosystem": "npm",
+      "verdict": "MALICIOUS",
+      "severity": "CRITICAL",
+      "summary": "メンテナーアカウント乗っ取りにより悪意ある依存 plain-crypto-js@4.2.1 が注入された。cross-platform RAT を配布する（2026-03-30）",
+      "source": "manual",
+      "reported_at": "2026-03-30",
+      "cve": null,
+      "osv_id": "MAL-2026-axios-1141"
+    },
+    {
+      "name": "axios",
+      "version": "0.30.4",
+      "ecosystem": "npm",
+      "verdict": "MALICIOUS",
+      "severity": "CRITICAL",
+      "summary": "メンテナーアカウント乗っ取りにより悪意ある依存 plain-crypto-js@4.2.1 が注入された。cross-platform RAT を配布する（2026-03-30）",
+      "source": "manual",
+      "reported_at": "2026-03-30",
+      "cve": null,
+      "osv_id": "MAL-2026-axios-0304"
+    },
+    {
+      "name": "plain-crypto-js",
+      "version": "4.2.1",
+      "ecosystem": "npm",
+      "verdict": "MALICIOUS",
+      "severity": "CRITICAL",
+      "summary": "axios サプライチェーン攻撃のペイロード。RAT（Remote Access Trojan）を Linux/Windows/macOS にドロップする目的で作成された悪意あるパッケージ",
+      "source": "manual",
+      "reported_at": "2026-03-30",
+      "cve": null,
+      "osv_id": "MAL-2026-plain-crypto-js"
     }
   ]
 }
