@@ -443,15 +443,80 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
 @cli.command()
 @click.option("--sbom", type=click.Path(exists=True), required=True)
 @click.option("--format", "fmt", default="cyclonedx", type=click.Choice(["cyclonedx", "spdx"]))
+@click.option("--osv/--no-osv", default=True, help="Check OSV.dev (online)")
+@click.option("--json", "json_output", is_flag=True)
 @click.pass_context
-def validate(ctx, sbom, fmt):
+def validate(ctx, sbom, fmt, osv, json_output):
     """Validate a SBOM against known malicious releases."""
+    asyncio.run(_validate(sbom, osv, json_output))
+
+
+async def _validate(sbom_path, check_osv, json_output):
     from depvet.watchlist.sbom import SBOMParser
+    from depvet.known_bad.database import KnownBadDB
+    from depvet.known_bad.osv import OSVChecker
+
     parser = SBOMParser()
-    entries = parser.parse(sbom)
+    entries = parser.parse(sbom_path)
     click.echo(f"📋 Parsed {len(entries)} packages from SBOM")
-    # TODO: check against known-bad release database
-    click.echo("⚠️  Known-bad database not yet implemented (Phase 2 feature)")
+
+    if not entries:
+        click.echo("⚠️  No packages found in SBOM")
+        return
+
+    # Check local known-bad DB
+    db = KnownBadDB()
+    local_hits = []
+    for entry in entries:
+        hit = db.lookup(entry.name, entry.current_version, entry.ecosystem)
+        if hit:
+            local_hits.append(hit)
+
+    # Check OSV.dev
+    osv_hits = {}
+    if check_osv:
+        click.echo(f"🔍 Checking {len(entries)} packages against OSV.dev...")
+        checker = OSVChecker()
+        pkg_list = [(e.name, e.current_version, e.ecosystem) for e in entries if e.current_version]
+        if pkg_list:
+            osv_hits = await checker.batch_check(pkg_list)
+
+    # Report
+    total_issues = len(local_hits) + sum(len(v) for v in osv_hits.values())
+
+    if json_output:
+        import json as _json
+        results = {
+            "total_packages": len(entries),
+            "issues_found": total_issues,
+            "local_db_hits": [{"name": h.name, "version": h.version, "ecosystem": h.ecosystem,
+                               "verdict": h.verdict, "severity": h.severity, "summary": h.summary}
+                              for h in local_hits],
+            "osv_hits": [{"name": h.name, "version": h.version, "ecosystem": h.ecosystem,
+                          "osv_id": h.osv_id, "severity": h.severity, "summary": h.summary}
+                         for hits in osv_hits.values() for h in hits],
+        }
+        click.echo(_json.dumps(results, indent=2, ensure_ascii=False))
+        return
+
+    if not total_issues:
+        click.echo(f"✅ No known threats found in {len(entries)} packages")
+        return
+
+    click.echo(f"\n🚨 Found {total_issues} issue(s):\n")
+
+    for hit in local_hits:
+        severity_icon = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡"}.get(hit.severity, "🔵")
+        click.echo(f"  {severity_icon} [{hit.verdict}] {hit.ecosystem}/{hit.name}@{hit.version}")
+        click.echo(f"     {hit.summary}")
+        if hit.cve:
+            click.echo(f"     CVE: {hit.cve}")
+
+    for key, hits in osv_hits.items():
+        for hit in hits:
+            severity_icon = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡"}.get(hit.severity, "🔵")
+            click.echo(f"  {severity_icon} [OSV:{hit.osv_id}] {hit.ecosystem}/{hit.name}@{hit.version}")
+            click.echo(f"     {hit.summary}")
 
 
 # ─────────────────────────────────────────────────────────────

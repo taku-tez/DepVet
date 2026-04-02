@@ -1,22 +1,34 @@
-"""Abstract base class for package registry watchers."""
+"""Abstract base class for registry monitors."""
+
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import AsyncIterator
+
 from depvet.models.package import Release
 
 
-class BaseRegistry(ABC):
+class BaseRegistryMonitor(ABC):
+    """Abstract registry monitor interface."""
+
     @abstractmethod
-    async def poll(self) -> list[Release]:
-        """Poll for new releases since last check. Returns list of Release."""
+    async def get_new_releases(
+        self,
+        watchlist: set[str],
+        since_state: dict,
+    ) -> tuple[list[Release], dict]:
+        """
+        Fetch new releases for packages in watchlist since the given state.
+        Returns: (releases, new_state)
+        """
         ...
 
     @abstractmethod
-    async def get_versions(self, package_name: str) -> list[str]:
-        """Get all versions of a package."""
+    async def load_top_n(self, n: int) -> list[str]:
+        """Return top N package names by download count."""
         ...
 
+    @property
     @abstractmethod
-    async def close(self) -> None:
-        """Clean up resources."""
+    def ecosystem(self) -> str:
+        """Ecosystem identifier."""
         ...

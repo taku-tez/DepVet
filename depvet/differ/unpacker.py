@@ -25,9 +25,12 @@ def unpack(archive_path: Path, dest_dir: Path) -> Path:
     """
     suffix = "".join(archive_path.suffixes).lower()
 
-    if suffix in (".whl", ".zip") or archive_path.suffix.lower() == ".whl":
+    if suffix in (".whl", ".zip") or archive_path.suffix.lower() in (".whl", ".zip"):
         return _unpack_zip(archive_path, dest_dir)
     elif suffix in (".tar.gz", ".tgz") or archive_path.name.endswith(".tar.gz"):
+        return _unpack_tarball(archive_path, dest_dir)
+    elif archive_path.suffix.lower() == ".crate":
+        # Cargo .crate files are tar.gz archives
         return _unpack_tarball(archive_path, dest_dir)
     else:
         raise ValueError(f"Unsupported archive format: {archive_path.name}")

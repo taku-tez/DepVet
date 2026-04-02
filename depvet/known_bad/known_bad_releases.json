@@ -1,0 +1,77 @@
+{
+  "updated_at": "2026-04-02T00:00:00+00:00",
+  "entries": [
+    {
+      "name": "ctx",
+      "version": "0.2.1",
+      "ecosystem": "pypi",
+      "verdict": "MALICIOUS",
+      "severity": "CRITICAL",
+      "summary": "環境変数を外部サーバーに送信するコードが含まれていた",
+      "source": "manual",
+      "reported_at": "2022-05-21",
+      "cve": null,
+      "osv_id": "MAL-2022-2701"
+    },
+    {
+      "name": "ua-parser-js",
+      "version": "0.7.29",
+      "ecosystem": "npm",
+      "verdict": "MALICIOUS",
+      "severity": "CRITICAL",
+      "summary": "暗号通貨マイナーとパスワード窃取マルウェアが注入された",
+      "source": "manual",
+      "reported_at": "2021-10-22",
+      "cve": "CVE-2021-41263",
+      "osv_id": null
+    },
+    {
+      "name": "event-stream",
+      "version": "3.3.6",
+      "ecosystem": "npm",
+      "verdict": "MALICIOUS",
+      "severity": "CRITICAL",
+      "summary": "flatmap-stream依存経由で暗号通貨ウォレット窃取コードが注入された",
+      "source": "manual",
+      "reported_at": "2018-11-26",
+      "cve": "CVE-2018-16492",
+      "osv_id": null
+    },
+    {
+      "name": "colors",
+      "version": "1.4.1",
+      "ecosystem": "npm",
+      "verdict": "MALICIOUS",
+      "severity": "HIGH",
+      "summary": "メンテナーが意図的に無限ループを導入しアプリケーションをクラッシュさせた",
+      "source": "manual",
+      "reported_at": "2022-01-08",
+      "cve": null,
+      "osv_id": null
+    },
+    {
+      "name": "faker",
+      "version": "6.6.6",
+      "ecosystem": "npm",
+      "verdict": "MALICIOUS",
+      "severity": "HIGH",
+      "summary": "メンテナーが意図的に無限ループを導入しアプリケーションをクラッシュさせた",
+      "source": "manual",
+      "reported_at": "2022-01-08",
+      "cve": null,
+      "osv_id": null
+    },
+    {
+      "name": "peacenotwar",
+      "version": "9.1.5",
+      "ecosystem": "npm",
+      "verdict": "MALICIOUS",
+      "severity": "MEDIUM",
+      "summary": "node-ipcの依存として含まれ、特定地域のIPからのアクセス時にファイルを上書きするコードが含まれていた",
+      "source": "manual",
+      "reported_at": "2022-03-16",
+      "cve": "CVE-2022-23812",
+      "osv_id": null
+    }
+  ]
+}

@@ -1,6 +1,8 @@
-from depvet.registry.base import BaseRegistry
-from depvet.registry.state import RegistryState
-from depvet.registry.pypi import PyPIRegistry
-from depvet.registry.npm import NpmRegistry
+from depvet.registry.base import BaseRegistryMonitor
+from depvet.registry.pypi import PyPIMonitor
+from depvet.registry.npm import NpmMonitor
+from depvet.registry.go import GoModulesMonitor
+from depvet.registry.cargo import CargoMonitor
+from depvet.registry.state import PollingState
 
-__all__ = ["BaseRegistry", "RegistryState", "PyPIRegistry", "NpmRegistry"]
+__all__ = ["BaseRegistryMonitor", "PyPIMonitor", "NpmMonitor", "GoModulesMonitor", "CargoMonitor", "PollingState"]

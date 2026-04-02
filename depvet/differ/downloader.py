@@ -122,5 +122,76 @@ async def download_package(
         return await download_pypi_package(name, version, dest_dir, session)
     elif ecosystem == "npm":
         return await download_npm_package(name, version, dest_dir, session)
+    elif ecosystem == "go":
+        return await download_go_module(name, version, dest_dir, session)
+    elif ecosystem == "cargo":
+        return await download_cargo_crate(name, version, dest_dir, session)
     else:
         raise ValueError(f"Unsupported ecosystem: {ecosystem}")
+
+
+async def download_go_module(
+    name: str,
+    version: str,
+    dest_dir: Path,
+    session: Optional[aiohttp.ClientSession] = None,
+) -> Optional[Path]:
+    """Download a Go module source zip from the module proxy."""
+    close_session = session is None
+    if session is None:
+        session = aiohttp.ClientSession()
+
+    try:
+        encoded = name.replace("/", "%2F")
+        url = f"https://proxy.golang.org/{encoded}/@v/{version}.zip"
+        filename = f"{name.replace('/', '_')}_{version}.zip"
+        dest_path = dest_dir / filename
+
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                logger.warning(f"Go proxy returned {resp.status} for {name}@{version}")
+                return None
+            with open(dest_path, "wb") as f:
+                async for chunk in resp.content.iter_chunked(65536):
+                    f.write(chunk)
+
+        logger.info(f"Downloaded Go module {name}@{version} -> {dest_path}")
+        return dest_path
+
+    finally:
+        if close_session:
+            await session.close()
+
+
+async def download_cargo_crate(
+    name: str,
+    version: str,
+    dest_dir: Path,
+    session: Optional[aiohttp.ClientSession] = None,
+) -> Optional[Path]:
+    """Download a Cargo crate from crates.io."""
+    close_session = session is None
+    if session is None:
+        session = aiohttp.ClientSession(
+            headers={"User-Agent": "depvet/0.1.0 (github.com/taku-tez/DepVet)"}
+        )
+
+    try:
+        url = f"https://static.crates.io/crates/{name}/{name}-{version}.crate"
+        filename = f"{name}-{version}.crate"
+        dest_path = dest_dir / filename
+
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                logger.warning(f"crates.io returned {resp.status} for {name}-{version}")
+                return None
+            with open(dest_path, "wb") as f:
+                async for chunk in resp.content.iter_chunked(65536):
+                    f.write(chunk)
+
+        logger.info(f"Downloaded Cargo crate {name}@{version} -> {dest_path}")
+        return dest_path
+
+    finally:
+        if close_session:
+            await session.close()
