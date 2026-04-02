@@ -221,6 +221,7 @@ class DeepAnalyzer:
         diff_stats: DiffStats,
         rule_matches: list | None = None,
         version_context: VersionTransitionContext | None = None,
+        new_deps: list | None = None,
     ) -> Verdict:
         start_ms = int(time.time() * 1000)
         total = len(chunks)
@@ -246,6 +247,24 @@ class DeepAnalyzer:
                 logger.error(f"Chunk {i} analysis failed: {result}")
             else:
                 valid_results.append(result)
+
+        # Augment version_context with zero-code-change signal if new_deps provided
+        if new_deps and diff_stats:
+            from depvet.analyzer.version_signal import analyze_zero_code_change_signal
+            zcc_signals = await analyze_zero_code_change_signal(diff_stats, new_deps, ecosystem)
+            if zcc_signals:
+                if version_context is None:
+                    version_context = VersionTransitionContext(
+                        package_name=package_name,
+                        ecosystem=ecosystem,
+                        old_version=old_version,
+                        new_version=new_version,
+                    )
+                version_context.signals.extend(zcc_signals)
+                logger.info(
+                    f"Zero-code-change signals for {package_name}: "
+                    f"{[s.signal_id for s in zcc_signals]}"
+                )
 
         return self.merger.merge(
             raw_verdicts=valid_results,

@@ -400,3 +400,80 @@ async def analyze_diff_stats_signals(
         ))
 
     return signals
+
+
+async def analyze_zero_code_change_signal(
+    diff_stats,
+    new_deps: list,
+    ecosystem: str = "",
+) -> list:
+    """
+    Detect the axios-style attack pattern:
+    "source code changed 0 lines, but new dependency added"
+
+    This is one of the strongest indicators of a supply chain injection:
+    legitimate maintainers rarely add dependencies without any code changes
+    that USE those dependencies.
+
+    Parameters:
+        diff_stats: DiffStats object
+        new_deps: list of NewDependency from dep_extractor
+        ecosystem: "npm" | "pypi" etc.
+
+    Returns:
+        list of VersionSignal
+    """
+    signals = []
+
+    if not new_deps or diff_stats is None:
+        return signals
+
+    # Heuristic: if total lines_added is very small relative to new deps,
+    # it's likely only manifest changes
+    # (diff_stats doesn't separate by file type, so we use a threshold)
+    total_lines = diff_stats.lines_added + diff_stats.lines_removed
+
+    # Core detection: total code changes are small (< 10 lines)
+    # but new dependencies were added
+    # This catches: package.json changes only
+    # Strongest signal: exactly 0 lines of code changed + new dep added
+    if total_lines == 0 and new_deps:
+        dep_names = [d.name for d in new_deps[:3]]
+        signals.append(VersionSignal(
+            signal_id="MANIFEST_ONLY_NEW_DEP",
+            description=(
+                f"コード変更ゼロかつ新規依存追加: {', '.join(dep_names)}"
+                f" — サプライチェーン攻撃の最高リスクパターン"
+            ),
+            severity="CRITICAL",
+            confidence_boost=0.35,
+        ))
+
+    # Strong signal: very few lines changed (1-5) + new dep added
+    elif total_lines <= 5 and new_deps:
+        dep_names = [d.name for d in new_deps[:3]]
+        signals.append(VersionSignal(
+            signal_id="ZERO_CODE_CHANGE_WITH_NEW_DEP",
+            description=(
+                f"ソースコード変更わずか{total_lines}行にもかかわらず"
+                f"新規依存パッケージが追加された: {', '.join(dep_names)}"
+                f" — axios 2026年攻撃と同一パターン"
+            ),
+            severity="HIGH",
+            confidence_boost=0.25,
+        ))
+
+    # Also flag if: large number of new deps added at once (unusual for minor versions)
+    if len(new_deps) >= 3:
+        dep_names = [d.name for d in new_deps[:5]]
+        signals.append(VersionSignal(
+            signal_id="MANY_NEW_DEPS_AT_ONCE",
+            description=(
+                f"一度に{len(new_deps)}個の新規依存パッケージが追加された: "
+                f"{', '.join(dep_names[:3])}{'...' if len(dep_names) > 3 else ''}"
+            ),
+            severity="MEDIUM",
+            confidence_boost=0.10,
+        ))
+
+    return signals

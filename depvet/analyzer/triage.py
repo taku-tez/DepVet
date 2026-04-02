@@ -10,6 +10,7 @@ from depvet.analyzer.import_diff import analyze_imports
 from depvet.analyzer.decode_scan import decode_and_scan
 from depvet.analyzer.ast_scan import ast_scan_diff
 from depvet.analyzer.dep_extractor import extract_new_dependencies, deps_to_watchlist_entries
+from depvet.analyzer.dep_reputation import evaluate_dep_reputation
 from depvet.differ.chunker import DiffChunk
 from depvet.models.verdict import FindingCategory, Severity
 
@@ -107,20 +108,49 @@ class TriageAnalyzer:
                                     ))
                                     return True, f"Known-bad依存追加検出: {dep.name}@{dep.version_spec}", all_rule_matches
 
-                            # Even if not in Known-bad DB, flag suspicious unknown deps
+                            # ── Reputation check for each new dependency ──
                             unknown_deps = deps_to_watchlist_entries(new_deps)
                             if unknown_deps:
-                                for dep_name, dep_eco in unknown_deps[:3]:
-                                    all_rule_matches.append(RuleMatch(
-                                        rule_id="UNKNOWN_DEP_ADDED",
-                                        category=FindingCategory.DEPENDENCY_CONFUSION,
-                                        severity=Severity.MEDIUM,
-                                        description=f"未知の依存パッケージ '{dep_name}' が追加された（サプライチェーン攻撃の典型パターン）",
-                                        evidence=f"new dep: {dep_name}",
-                                        file=f.path,
-                                        line_number=None,
-                                        cwe="CWE-1021",
-                                    ))
+                                for dep_name, dep_eco in unknown_deps[:5]:
+                                    try:
+                                        rep = await evaluate_dep_reputation(dep_name, dep_eco, "")
+                                        if rep.severity in ("CRITICAL", "HIGH"):
+                                            sev_val = Severity(rep.severity)
+                                            all_rule_matches.append(RuleMatch(
+                                                rule_id="SUSPICIOUS_NEW_DEP_REPUTATION",
+                                                category=FindingCategory.DEPENDENCY_CONFUSION,
+                                                severity=sev_val,
+                                                description=rep.description or f"新規依存パッケージ '{dep_name}' の信頼性が低い: {', '.join(rep.signals[:2])}",
+                                                evidence=f"{dep_name}: age={rep.age_days}d dl={rep.weekly_downloads}",
+                                                file=f.path,
+                                                line_number=None,
+                                                cwe="CWE-1021",
+                                            ))
+                                            if rep.severity == "CRITICAL":
+                                                return True, f"信頼性不明の新規依存検出: {dep_name}（公開{rep.age_days}日、DL:{rep.weekly_downloads}）", all_rule_matches
+                                        elif rep.severity == "MEDIUM":
+                                            all_rule_matches.append(RuleMatch(
+                                                rule_id="UNKNOWN_DEP_ADDED",
+                                                category=FindingCategory.DEPENDENCY_CONFUSION,
+                                                severity=Severity.MEDIUM,
+                                                description=f"新規依存パッケージ '{dep_name}' が追加された（信頼性要確認）",
+                                                evidence=f"new dep: {dep_name}",
+                                                file=f.path,
+                                                line_number=None,
+                                                cwe="CWE-1021",
+                                            ))
+                                    except Exception as rep_err:
+                                        logger.debug(f"Reputation check failed for {dep_name}: {rep_err}")
+                                        all_rule_matches.append(RuleMatch(
+                                            rule_id="UNKNOWN_DEP_ADDED",
+                                            category=FindingCategory.DEPENDENCY_CONFUSION,
+                                            severity=Severity.MEDIUM,
+                                            description=f"未知の依存パッケージ '{dep_name}' が追加された（信頼性確認失敗）",
+                                            evidence=f"new dep: {dep_name}",
+                                            file=f.path,
+                                            line_number=None,
+                                            cwe="CWE-1021",
+                                        ))
 
         # ── Phase 3: Base64/hex decode scan ────────────────────────────────
         for chunk in chunks:
