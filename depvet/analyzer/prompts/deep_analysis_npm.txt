@@ -6,6 +6,7 @@
 - パッケージ名: {package_name}
 - バージョン変更: {old_version} → {new_version}
 
+{pre_analysis_context}
 ---
 
 ## npm固有の攻撃パターン（Few-shot examples）

@@ -7,7 +7,10 @@ import logging
 from typing import Optional
 
 from depvet.analyzer.base import BaseAnalyzer
-from depvet.analyzer.rules import scan_diff, is_likely_benign, RuleMatch
+from depvet.analyzer.rules import scan_diff_full, is_likely_benign, RuleMatch
+from depvet.analyzer.import_diff import analyze_imports
+from depvet.analyzer.decode_scan import decode_and_scan
+from depvet.analyzer.ast_scan import ast_scan_diff
 from depvet.differ.chunker import DiffChunk
 
 logger = logging.getLogger(__name__)
@@ -17,11 +20,13 @@ class TriageAnalyzer:
     """
     Stage 1: Quick triage of diff chunks.
 
-    Two-phase approach:
-    1. Rule-based pre-screening (fast, no LLM cost)
-       - Immediate flag: hardcoded IPs, base64+exec, credential access
-       - Immediate skip: doc/comment-only diffs
-    2. LLM triage (only if rules don't give a definitive answer)
+    Four-phase approach (no LLM cost):
+    1. Rule-based scan (single-line + window patterns)
+    2. Import diff analysis (new suspicious modules)
+    3. Base64/hex decode + re-scan (hidden payloads)
+    4. AST analysis (obfuscation: getattr/chr/aliased exec)
+
+    Falls through to LLM only when rules are inconclusive.
     """
 
     def __init__(self, analyzer: BaseAnalyzer):
@@ -35,42 +40,106 @@ class TriageAnalyzer:
         new_version: str,
     ) -> tuple[bool, str, list[RuleMatch]]:
         """
-        Run triage on diff chunks.
         Returns (should_deep_analyze, reason, rule_matches).
-
-        rule_matches are pre-found IOCs that can seed the deep analysis.
+        rule_matches includes hits from all static analysis phases.
         """
         if not chunks:
             return False, "no diff chunks", []
 
-        # Phase 1: Rule-based scan across all chunks
+        # ── Phase 1: Rule-based (single + window) ──────────────────────────
         all_rule_matches: list[RuleMatch] = []
         for chunk in chunks:
             for f in chunk.files:
                 if not f.is_binary and f.content:
-                    matches = scan_diff(f.content, f.path)
+                    matches = scan_diff_full(f.content, f.path)
                     all_rule_matches.extend(matches)
 
-        if all_rule_matches:
-            # Critical/High rule matches → immediate analyze
-            critical = [m for m in all_rule_matches if m.severity.value in ("CRITICAL", "HIGH")]
-            if critical:
-                reasons = list({m.description for m in critical[:2]})
-                return True, f"ルールベース検出: {reasons[0]}", all_rule_matches
+        critical_rules = [m for m in all_rule_matches if m.severity.value == "CRITICAL"]
+        if critical_rules:
+            return True, f"ルールエンジン(CRITICAL): {critical_rules[0].description}", all_rule_matches
 
-        # Phase 1b: Check if diff is likely benign (skip LLM)
+        # ── Phase 2: Import diff analysis ──────────────────────────────────
+        for chunk in chunks:
+            for f in chunk.files:
+                if not f.is_binary and f.content and f.path.endswith((".py", ".js", ".ts", "")):
+                    import_signals = analyze_imports(f.content)
+                    if any(s.severity in ("CRITICAL", "HIGH") for s in import_signals):
+                        # Convert import signals to RuleMatch-like objects
+                        for sig in import_signals:
+                            if sig.severity in ("CRITICAL", "HIGH"):
+                                from depvet.models.verdict import Severity as _Sev, FindingCategory as _FC
+                                all_rule_matches.append(RuleMatch(
+                                    rule_id=f"IMPORT_{sig.module.upper().replace('.', '_')}",
+                                    category=FindingCategory.EXECUTION,
+                                    severity=Severity(sig.severity),
+                                    description=sig.description,
+                                    evidence=f"import {sig.module}",
+                                    file=f.path,
+                                    line_number=sig.line_number,
+                                    cwe="CWE-913",
+                                ))
+                        if any(s.severity == "CRITICAL" for s in import_signals):
+                            return True, f"新規危険インポート検出: {import_signals[0].module}", all_rule_matches
+
+        # ── Phase 3: Base64/hex decode scan ────────────────────────────────
+        for chunk in chunks:
+            for f in chunk.files:
+                if not f.is_binary and f.content:
+                    decoded_hits = decode_and_scan(f.content, f.path)
+                    if decoded_hits:
+                        critical_decoded = [d for d in decoded_hits if d.severity == Severity.CRITICAL]
+                        if critical_decoded:
+                            from depvet.models.verdict import Severity, FindingCategory
+                            for d in critical_decoded:
+                                all_rule_matches.append(RuleMatch(
+                                    rule_id="DECODED_PAYLOAD_CRITICAL",
+                                    category=d.category,
+                                    severity=d.severity,
+                                    description=d.description,
+                                    evidence=d.original_encoded,
+                                    file=d.file,
+                                    line_number=d.line_number,
+                                    cwe=d.cwe,
+                                ))
+                            return True, f"エンコードされたペイロード検出({decoded_hits[0].encoding})", all_rule_matches
+
+        # ── Phase 4: AST analysis ───────────────────────────────────────────
+        for chunk in chunks:
+            for f in chunk.files:
+                if not f.is_binary and f.content and f.path.endswith((".py", ".pyw", "")):
+                    ast_findings = ast_scan_diff(f.content, f.path)
+                    critical_ast = [a for a in ast_findings if a.severity.value == "CRITICAL"]
+                    if critical_ast:
+                        from depvet.models.verdict import Severity
+                        for a in critical_ast:
+                            all_rule_matches.append(RuleMatch(
+                                rule_id=a.finding_id,
+                                category=a.category,
+                                severity=a.severity,
+                                description=a.description,
+                                evidence=a.evidence,
+                                file=f.path,
+                                line_number=a.line_number,
+                                cwe=a.cwe,
+                            ))
+                        return True, f"AST解析(CRITICAL): {critical_ast[0].description}", all_rule_matches
+
+        # ── Check if likely benign (skip LLM) ──────────────────────────────
         all_content = " ".join(
-            f.content for chunk in chunks for f in chunk.files
-            if not f.is_binary
+            f.content for chunk in chunks for f in chunk.files if not f.is_binary
         )
         if is_likely_benign(all_content) and not all_rule_matches:
-            return False, "コメント/ドキュメント変更のみ（ルールベース判定）", []
+            return False, "コメント/ドキュメント変更のみ（静的解析判定）", []
 
-        # Phase 2: LLM triage on first chunk (priority files)
+        # ── HIGH rule matches → still LLM analyze ──────────────────────────
+        high_rules = [m for m in all_rule_matches if m.severity.value == "HIGH"]
+        if high_rules:
+            return True, f"ルールエンジン(HIGH): {high_rules[0].description}", all_rule_matches
+
+        # ── Phase 5: LLM triage as final arbiter ───────────────────────────
         should, reason = await self.analyzer.triage(
             chunks[0], package_name, old_version, new_version
         )
-
         if should:
             return True, reason, all_rule_matches
 

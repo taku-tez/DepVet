@@ -223,6 +223,75 @@ MALICIOUS_PATTERNS: list[dict] = [
         "description": "IPアドレスへの直接ソケット接続が追加された",
         "cwe": "CWE-913",
     },
+    # CI/Sandbox evasion: check for CI env vars before executing
+    {
+        "id": "CI_EVASION",
+        "pattern": re.compile(
+            r"""os\.(environ|getenv)\s*[.(].*?(?:CI|GITHUB_ACTIONS|TRAVIS|JENKINS|CIRCLECI|GITLAB_CI|BUILDKITE)""",
+            re.IGNORECASE,
+        ),
+        "category": FindingCategory.EXECUTION,
+        "severity": Severity.HIGH,
+        "description": "CI環境変数をチェックするコードが追加された（サンドボックス回避の典型パターン）",
+        "cwe": "CWE-693",
+    },
+    # Time bomb: conditional execution based on date
+    {
+        "id": "TIME_BOMB",
+        "pattern": re.compile(
+            r"""datetime\.date\.today\(\)|datetime\.datetime\.now\(\)""",
+            re.IGNORECASE,
+        ),
+        "category": FindingCategory.EXECUTION,
+        "severity": Severity.MEDIUM,
+        "description": "日時チェックを含むコードが追加された（時限起動パターンの可能性）",
+        "cwe": "CWE-693",
+    },
+    # atexit delayed execution
+    {
+        "id": "ATEXIT_DELAYED",
+        "pattern": re.compile(r"""atexit\.register\s*\(""", re.IGNORECASE),
+        "category": FindingCategory.EXECUTION,
+        "severity": Severity.HIGH,
+        "description": "atexit.register()による遅延実行が追加された（インタプリタ終了時に実行）",
+        "cwe": "CWE-693",
+    },
+    # Credential file check (targeted attack pattern)
+    {
+        "id": "CREDENTIAL_PATH_CHECK",
+        "pattern": re.compile(
+            r"""os\.path\.(exists|isfile|expanduser)\s*\(.*?(?:\.aws|\.ssh|credentials|id_rsa)""",
+            re.IGNORECASE,
+        ),
+        "category": FindingCategory.EXFILTRATION,
+        "severity": Severity.HIGH,
+        "description": "認証情報ファイルパスの存在確認が追加された（標的型攻撃パターン）",
+        "cwe": "CWE-200",
+    },
+    # getattr obfuscation
+    {
+        "id": "GETATTR_EXEC",
+        "pattern": re.compile(
+            r"""getattr\s*\(.*?['"](exec|eval|system|popen|urlopen|b64decode)['"]\s*\)""",
+            re.IGNORECASE,
+        ),
+        "category": FindingCategory.OBFUSCATION,
+        "severity": Severity.CRITICAL,
+        "description": "getattr()を使って危険な関数に難読化アクセスしている",
+        "cwe": "CWE-506",
+    },
+    # chr() concatenation to build exec/eval
+    {
+        "id": "CHR_CONCAT_EXEC",
+        "pattern": re.compile(
+            r"""chr\s*\(\d+\)\s*\+\s*chr\s*\(\d+\)""",
+            re.IGNORECASE,
+        ),
+        "category": FindingCategory.OBFUSCATION,
+        "severity": Severity.HIGH,
+        "description": "chr()連結による文字列難読化が検出された（exec/evalなどの関数名隠蔽に使われる）",
+        "cwe": "CWE-506",
+    },
     # Reverse shell patterns
     {
         "id": "REVERSE_SHELL",
