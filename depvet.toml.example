@@ -1,0 +1,47 @@
+# depvet.toml — DepVet configuration file
+# Copy to depvet.toml and customize.
+
+[llm]
+provider = "claude"            # claude | openai | local
+model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"
+triage_model = "claude-haiku-4-5-20251001"  # Cheaper model for Stage 1 triage
+max_tokens = 4096
+timeout = 60                   # seconds
+
+[monitor]
+interval = 300                 # Polling interval (seconds)
+ecosystems = ["pypi", "npm"]
+max_concurrent_analyses = 4
+queue_max_size = 100
+
+[watchlist]
+sources = ["sbom", "top_n"]
+sbom_path = "./sbom.cyclonedx.json"
+sbom_format = "cyclonedx"      # cyclonedx | spdx
+top_n_pypi = 1000
+top_n_npm = 1000
+refresh_interval = 86400       # Watchlist refresh interval (seconds)
+
+[diff]
+max_chunk_tokens = 8000
+skip_test_files = true
+skip_docs = true
+priority_files = [
+    "setup.py", "pyproject.toml", "package.json",
+    "__init__.py", "index.js", "auth.py",
+]
+
+[alert]
+min_severity = "MEDIUM"        # Only alert on MEDIUM and above
+slack_webhook_env = "DEPVET_SLACK_WEBHOOK"
+webhook_url = ""
+webhook_secret_env = "DEPVET_WEBHOOK_SECRET"
+
+[state]
+path = "./depvet_state.yaml"   # Polling state persistence
+
+[securify]
+enabled = false
+endpoint = "https://api.securify.example.com"
+api_key_env = "SECURIFY_API_KEY"

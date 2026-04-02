@@ -1,0 +1,126 @@
+"""Package downloader for PyPI and npm."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import tempfile
+from pathlib import Path
+from typing import Optional
+
+import aiohttp
+
+logger = logging.getLogger(__name__)
+
+PYPI_JSON_API = "https://pypi.org/pypi/{name}/{version}/json"
+NPM_REGISTRY_URL = "https://registry.npmjs.org/{name}/{version}"
+
+
+async def download_pypi_package(
+    name: str,
+    version: str,
+    dest_dir: Path,
+    session: Optional[aiohttp.ClientSession] = None,
+) -> Optional[Path]:
+    """Download a PyPI package (wheel or sdist) to dest_dir."""
+    close_session = session is None
+    if session is None:
+        session = aiohttp.ClientSession()
+
+    try:
+        url = PYPI_JSON_API.format(name=name, version=version)
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                logger.warning(f"PyPI JSON API returned {resp.status} for {name}=={version}")
+                return None
+            data = await resp.json()
+
+        urls = data.get("urls", [])
+        # Prefer wheel, fall back to sdist
+        wheel = next((u for u in urls if u["packagetype"] == "bdist_wheel"), None)
+        sdist = next((u for u in urls if u["packagetype"] == "sdist"), None)
+        chosen = wheel or sdist
+        if not chosen:
+            logger.warning(f"No downloadable release found for {name}=={version}")
+            return None
+
+        file_url = chosen["url"]
+        filename = chosen["filename"]
+        dest_path = dest_dir / filename
+
+        async with session.get(file_url) as resp:
+            if resp.status != 200:
+                logger.warning(f"Failed to download {file_url}")
+                return None
+            with open(dest_path, "wb") as f:
+                async for chunk in resp.content.iter_chunked(65536):
+                    f.write(chunk)
+
+        logger.info(f"Downloaded {name}=={version} -> {dest_path}")
+        return dest_path
+
+    finally:
+        if close_session:
+            await session.close()
+
+
+async def download_npm_package(
+    name: str,
+    version: str,
+    dest_dir: Path,
+    session: Optional[aiohttp.ClientSession] = None,
+) -> Optional[Path]:
+    """Download an npm package tarball to dest_dir."""
+    close_session = session is None
+    if session is None:
+        session = aiohttp.ClientSession()
+
+    try:
+        # Scoped packages: @scope/name -> @scope%2Fname
+        encoded_name = name.replace("/", "%2F")
+        url = NPM_REGISTRY_URL.format(name=encoded_name, version=version)
+
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                logger.warning(f"npm registry returned {resp.status} for {name}@{version}")
+                return None
+            data = await resp.json()
+
+        tarball_url = data.get("dist", {}).get("tarball")
+        if not tarball_url:
+            logger.warning(f"No tarball URL found for {name}@{version}")
+            return None
+
+        filename = f"{name.replace('/', '_')}_{version}.tgz"
+        dest_path = dest_dir / filename
+
+        async with session.get(tarball_url) as resp:
+            if resp.status != 200:
+                logger.warning(f"Failed to download {tarball_url}")
+                return None
+            with open(dest_path, "wb") as f:
+                async for chunk in resp.content.iter_chunked(65536):
+                    f.write(chunk)
+
+        logger.info(f"Downloaded {name}@{version} -> {dest_path}")
+        return dest_path
+
+    finally:
+        if close_session:
+            await session.close()
+
+
+async def download_package(
+    name: str,
+    version: str,
+    ecosystem: str,
+    dest_dir: Path,
+    session: Optional[aiohttp.ClientSession] = None,
+) -> Optional[Path]:
+    """Download a package from the specified ecosystem."""
+    if ecosystem == "pypi":
+        return await download_pypi_package(name, version, dest_dir, session)
+    elif ecosystem == "npm":
+        return await download_npm_package(name, version, dest_dir, session)
+    else:
+        raise ValueError(f"Unsupported ecosystem: {ecosystem}")
