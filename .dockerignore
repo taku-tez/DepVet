@@ -1,0 +1,41 @@
+# Build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Dev/test
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+tests/
+*.egg-info/
+dist/
+build/
+
+# Version control
+.git/
+.gitignore
+.github/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Secrets / local config
+.env
+*.env
+depvet.toml
+*.pem
+*.key
+
+# Docs
+*.md
+!README.md
+docs/
