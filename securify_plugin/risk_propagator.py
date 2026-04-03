@@ -24,6 +24,21 @@ class RiskPropagator:
     def __init__(self, risk_score_service=None):
         self._service = risk_score_service
 
+    @staticmethod
+    def _severity_from_finding(finding) -> Severity:
+        if hasattr(finding, "verdict") and getattr(finding.verdict, "severity", None):
+            return finding.verdict.severity
+
+        raw = getattr(finding, "severity", None)
+        if isinstance(raw, Severity):
+            return raw
+        if isinstance(raw, str):
+            try:
+                return Severity(raw.upper())
+            except ValueError:
+                return Severity.MEDIUM
+        return Severity.MEDIUM
+
     async def propagate(
         self,
         tenant_id: str,
@@ -31,7 +46,7 @@ class RiskPropagator:
         blast_radius: BlastRadius,
     ) -> None:
         """Propagate risk scores to all affected services."""
-        severity = finding.verdict.severity if hasattr(finding, 'verdict') else Severity.MEDIUM
+        severity = self._severity_from_finding(finding)
         scores = SEVERITY_SCORES.get(severity, SEVERITY_SCORES[Severity.MEDIUM])
 
         for service in blast_radius.direct_dependencies:

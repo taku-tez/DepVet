@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from depvet.models.package import Release
-from depvet.models.verdict import Severity, Verdict, VerdictType
+from depvet.models.verdict import Verdict, VerdictType
 from securify_plugin.skg_writer import BlastRadius
 
 logger = logging.getLogger(__name__)

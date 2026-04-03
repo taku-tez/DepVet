@@ -7,6 +7,7 @@ import logging
 import re
 from pathlib import Path
 from typing import Optional
+from urllib.parse import unquote
 
 from depvet.watchlist.explicit import WatchlistEntry
 
@@ -23,7 +24,8 @@ ECO_MAP = {
 
 
 def _parse_purl(purl: str) -> Optional[WatchlistEntry]:
-    m = PURL_RE.match(purl)
+    decoded = unquote(purl)
+    m = PURL_RE.match(decoded)
     if not m:
         return None
     ecosystem = ECO_MAP.get(m.group("ecosystem").lower(), m.group("ecosystem").lower())
@@ -31,10 +33,33 @@ def _parse_purl(purl: str) -> Optional[WatchlistEntry]:
     ns = m.group("namespace")
     if ns:
         if ecosystem == "npm":
-            name = f"@{ns}/{name}"
+            scope = ns if ns.startswith("@") else f"@{ns}"
+            name = f"{scope}/{name}"
+        elif ecosystem == "go":
+            name = f"{ns}/{name}"
         elif ecosystem == "maven":
             name = f"{ns}:{name}"
     return WatchlistEntry(name=name, ecosystem=ecosystem, current_version=m.group("version") or "")
+
+
+def _infer_fallback_entry(
+    *,
+    name: str,
+    version: str,
+    group: str = "",
+    bom_ref: str = "",
+) -> Optional[WatchlistEntry]:
+    if not name:
+        return None
+    if group:
+        return WatchlistEntry(name=f"{group}:{name}", ecosystem="maven", current_version=version)
+    if name.startswith("@") and "/" in name:
+        return WatchlistEntry(name=name, ecosystem="npm", current_version=version)
+    if "/" in name and "." in name.split("/", 1)[0]:
+        return WatchlistEntry(name=name, ecosystem="go", current_version=version)
+    if bom_ref.startswith("pkg:"):
+        return _parse_purl(bom_ref)
+    return WatchlistEntry(name=name, ecosystem="unknown", current_version=version)
 
 
 class SBOMParser:
@@ -66,7 +91,14 @@ class SBOMParser:
                     continue
             name = comp.get("name", "")
             if name and comp.get("type") == "library":
-                entries.append(WatchlistEntry(name=name, ecosystem="pypi", current_version=comp.get("version", "")))
+                entry = _infer_fallback_entry(
+                    name=name,
+                    version=comp.get("version", ""),
+                    group=comp.get("group", ""),
+                    bom_ref=comp.get("bom-ref", ""),
+                )
+                if entry:
+                    entries.append(entry)
         return entries
 
     def _parse_cyclonedx_xml(self, content: str) -> list[WatchlistEntry]:
@@ -101,5 +133,11 @@ class SBOMParser:
             else:
                 name = pkg.get("name", "")
                 if name:
-                    entries.append(WatchlistEntry(name=name, ecosystem="pypi", current_version=pkg.get("versionInfo", "")))
+                    entry = _infer_fallback_entry(
+                        name=name,
+                        version=pkg.get("versionInfo", ""),
+                        bom_ref=pkg.get("SPDXID", ""),
+                    )
+                    if entry:
+                        entries.append(entry)
         return entries

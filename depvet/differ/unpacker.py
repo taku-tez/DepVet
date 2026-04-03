@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import tarfile
 import zipfile
+from inspect import signature
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -119,6 +120,9 @@ def _unpack_tarball(archive_path: Path, dest_dir: Path) -> Path:
         if total_size > _MAX_UNCOMPRESSED_BYTES:
             logger.warning("Tarball too large (>500 MB uncompressed), truncating")
             members = members[:_MAX_FILE_COUNT]
-        tf.extractall(out, members=members)  # type: ignore[call-arg]
+        if "filter" in signature(tf.extractall).parameters:
+            tf.extractall(out, members=members, filter="data")
+        else:
+            tf.extractall(out, members=members)
 
     return out

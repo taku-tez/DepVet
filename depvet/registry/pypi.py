@@ -11,6 +11,7 @@ import aiohttp
 
 from depvet.models.package import Release
 from depvet.registry.base import BaseRegistryMonitor
+from depvet.registry.versioning import sort_versions
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ class PyPIMonitor(BaseRegistryMonitor):
                     if resp.status != 200:
                         return None
                     data = await resp.json()
-            releases = sorted(data.get("releases", {}).keys())
+            releases = sort_versions(list(data.get("releases", {}).keys()), "pypi")
             if version in releases:
                 idx = releases.index(version)
                 if idx > 0:

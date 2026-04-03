@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import re
+from pathlib import Path
 from typing import Optional
 
 from depvet.watchlist.manager import WatchlistManager
@@ -27,12 +29,40 @@ class WatchlistSyncJob:
         watchlist_manager: Optional[WatchlistManager] = None,
         sbom_parser: Optional[SBOMParser] = None,
         tenant_registry=None,  # Securify tenant store
+        tenant_storage_dir: str | Path | None = None,
     ):
-        self._wl = watchlist_manager or WatchlistManager()
+        self._watchlist_template = watchlist_manager
         self._parser = sbom_parser or SBOMParser()
         self._tenant_registry = tenant_registry
+        self._tenant_storage_dir = self._resolve_storage_dir(watchlist_manager, tenant_storage_dir)
         # tenant_id -> set of (package_name, ecosystem, version)
         self._tenant_packages: dict[str, set[tuple[str, str, str]]] = {}
+        self._tenant_watchlists: dict[str, WatchlistManager] = {}
+
+    @staticmethod
+    def _resolve_storage_dir(
+        watchlist_manager: Optional[WatchlistManager],
+        tenant_storage_dir: str | Path | None,
+    ) -> Path:
+        if tenant_storage_dir is not None:
+            return Path(tenant_storage_dir)
+        if watchlist_manager is not None:
+            base = watchlist_manager.storage_path
+            return base.parent / f"{base.stem}_tenants"
+        return Path(".depvet_watchlists") / "tenants"
+
+    @staticmethod
+    def _tenant_filename(tenant_id: str) -> str:
+        sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", tenant_id).strip("._")
+        return sanitized or "tenant"
+
+    def _manager_for_tenant(self, tenant_id: str) -> WatchlistManager:
+        manager = self._tenant_watchlists.get(tenant_id)
+        if manager is None:
+            storage_path = self._tenant_storage_dir / f"{self._tenant_filename(tenant_id)}.yaml"
+            manager = WatchlistManager(storage_path=str(storage_path))
+            self._tenant_watchlists[tenant_id] = manager
+        return manager
 
     async def on_sbom_scan_complete(
         self, tenant_id: str, sbom_path: str
@@ -43,9 +73,10 @@ class WatchlistSyncJob:
         """
         entries = self._parser.parse(sbom_path)
         pkg_set: set[tuple[str, str, str]] = set()
+        tenant_watchlist = self._manager_for_tenant(tenant_id)
+        tenant_watchlist.replace(entries)
 
         for entry in entries:
-            self._wl.add(entry.name, entry.ecosystem)
             pkg_set.add((entry.name, entry.ecosystem, entry.current_version))
 
         self._tenant_packages[tenant_id] = pkg_set
@@ -71,3 +102,6 @@ class WatchlistSyncJob:
 
     def tenant_package_count(self, tenant_id: str) -> int:
         return len(self._tenant_packages.get(tenant_id, set()))
+
+    def tenant_watchlist_set(self, tenant_id: str, ecosystem: str) -> set[str]:
+        return self._manager_for_tenant(tenant_id).as_set(ecosystem)

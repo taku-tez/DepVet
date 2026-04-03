@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from click.testing import CliRunner
 
@@ -130,18 +130,16 @@ class TestSecurityPackageDormancy:
             "info": {"author": "PyCA", "home_page": ""},
         }
 
-        with patch("aiohttp.ClientSession") as mock_session_cls:
-            mock_resp = AsyncMock()
-            mock_resp.status = 200
-            mock_resp.json = AsyncMock(return_value=fake_pypi_data)
-            mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
-            mock_resp.__aexit__ = AsyncMock(return_value=False)
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.json = AsyncMock(return_value=fake_pypi_data)
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
 
-            mock_session = AsyncMock()
-            mock_session.get.return_value = mock_resp
-            mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_session = MagicMock()
+        mock_session.get.return_value = mock_resp
 
+        with patch("depvet.analyzer.version_signal._get_version_info_pypi", AsyncMock(return_value=None)):
             ctx = await analyze_pypi_transition("cryptography", "41.0.0", "42.0.0", mock_session)
 
         dormancy_signals = [s for s in ctx.signals if "DORMANCY" in s.signal_id]

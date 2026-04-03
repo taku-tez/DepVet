@@ -55,6 +55,18 @@ def _parse_finding(raw: dict) -> Optional[Finding]:
         return None
 
 
+def _finding_key(
+    *,
+    file: str,
+    category: str,
+    line_start: int | None,
+    line_end: int | None,
+    evidence: str,
+) -> tuple[str, str, int | None, int | None, str]:
+    evidence_key = evidence if line_start is None and line_end is None else ""
+    return (file, category, line_start, line_end, evidence_key)
+
+
 class VerdictMerger:
     """
     Merges Verdict results from multiple diff chunks into one.
@@ -108,14 +120,20 @@ class VerdictMerger:
             confidence = weighted / total_findings
 
         # Deduplicate findings by (file, category)
-        seen: set[tuple[str, str]] = set()
+        seen: set[tuple[str, str, int | None, int | None, str]] = set()
         merged_findings: list[Finding] = []
         for r in raw_verdicts:
             for raw_f in r.get("findings", []):
                 f = _parse_finding(raw_f)
                 if f is None:
                     continue
-                key = (f.file, f.category.value)
+                key = _finding_key(
+                    file=f.file,
+                    category=f.category.value,
+                    line_start=f.line_start,
+                    line_end=f.line_end,
+                    evidence=f.evidence,
+                )
                 if key not in seen:
                     seen.add(key)
                     merged_findings.append(f)
@@ -131,9 +149,24 @@ class VerdictMerger:
 
         # Inject rule-based findings (if not already covered by LLM findings)
         if rule_matches:
-            rule_keys = {(f.file, f.category.value) for f in merged_findings}
+            rule_keys = {
+                _finding_key(
+                    file=f.file,
+                    category=f.category.value,
+                    line_start=f.line_start,
+                    line_end=f.line_end,
+                    evidence=f.evidence,
+                )
+                for f in merged_findings
+            }
             for rm in rule_matches:
-                key = (rm.file, rm.category.value)
+                key = _finding_key(
+                    file=rm.file,
+                    category=rm.category.value,
+                    line_start=rm.line_number,
+                    line_end=rm.line_number,
+                    evidence=rm.evidence,
+                )
                 if key not in rule_keys:
                     merged_findings.append(Finding(
                         category=rm.category,
