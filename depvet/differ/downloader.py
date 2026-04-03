@@ -124,6 +124,12 @@ async def download_package(
         return await download_go_module(name, version, dest_dir, session)
     elif ecosystem == "cargo":
         return await download_cargo_crate(name, version, dest_dir, session)
+    elif ecosystem == "maven":
+        raise NotImplementedError(
+            f"Maven package download is not yet implemented. "
+            f"Cannot download {name}=={version} from Maven Central. "
+            "Maven support is limited to SBOM import and watchlist tracking."
+        )
     else:
         raise ValueError(f"Unsupported ecosystem: {ecosystem}")
 

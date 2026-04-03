@@ -352,8 +352,8 @@ def monitor(ctx, top, sbom, interval, once, no_npm, no_pypi, no_analyze, slack):
     config = ctx.obj["config"]
     # CLI flag overrides config; config provides the default
     effective_interval = interval if interval != 300 else config.monitor.interval
-    effective_top = top if top > 0 else config.watchlist.top_n_pypi
-    asyncio.run(_monitor(config, effective_top, sbom, effective_interval, once, no_npm, no_pypi, no_analyze, slack))
+    # top=0 means "use config defaults" — pass 0 so _monitor can use per-ecosystem config values
+    asyncio.run(_monitor(config, top, sbom, effective_interval, once, no_npm, no_pypi, no_analyze, slack))
 
 
 async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyze, slack):
@@ -361,6 +361,7 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
     from depvet.registry.npm import NpmMonitor
     from depvet.registry.go import GoModulesMonitor
     from depvet.registry.cargo import CargoMonitor
+    from depvet.registry.maven import MavenMonitor
     from depvet.registry.state import PollingState
     from depvet.watchlist.manager import WatchlistManager
     from depvet.alert.router import AlertRouter
@@ -389,19 +390,33 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
         monitors.append(GoModulesMonitor())
     if "cargo" in active_ecosystems:
         monitors.append(CargoMonitor())
+    if "maven" in active_ecosystems:
+        click.echo(
+            "⚠️  Maven monitoring tracks releases but scan/diff/download is not yet supported.",
+            err=True,
+        )
+        monitors.append(MavenMonitor())
 
     if not monitors:
         click.echo("❌ No ecosystems enabled", err=True)
         sys.exit(1)
 
-    # Load top-N watchlist
-    if top > 0:
-        for mon in monitors:
-            click.echo(f"  Loading top-{top} {mon.ecosystem} packages...")
-            pkgs = await mon.load_top_n(top)
-            for p in pkgs:
-                wl.add(p, mon.ecosystem)
-            click.echo(f"  → {len(pkgs)} packages added")
+    # Load top-N watchlist (ephemeral — does NOT persist to .depvet_watchlist.yaml)
+    # Per-ecosystem top values from config; CLI --top overrides all ecosystems uniformly
+    ephemeral_top: dict[str, set[str]] = {}  # ecosystem -> set of package names
+    for mon in monitors:
+        eco = mon.ecosystem
+        if top > 0:
+            n = top
+        elif eco == "npm":
+            n = config.watchlist.top_n_npm
+        else:
+            n = config.watchlist.top_n_pypi
+        if n > 0:
+            click.echo(f"  Loading top-{n} {eco} packages (ephemeral)...")
+            pkgs = await mon.load_top_n(n)
+            ephemeral_top[eco] = set(pkgs)
+            click.echo(f"  → {len(pkgs)} packages added to ephemeral set")
 
     # Alert router
     router = AlertRouter(min_severity=config.alert.min_severity)
@@ -425,7 +440,8 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
     while True:
         for mon in monitors:
             eco = mon.ecosystem
-            watchlist_set = wl.as_set(eco)
+            # Merge explicit watchlist with ephemeral top-N (top-N is NOT persisted)
+            watchlist_set = wl.as_set(eco) | ephemeral_top.get(eco, set())
             if not watchlist_set:
                 continue
 
@@ -436,59 +452,58 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
             if releases:
                 click.echo(f"  [{eco}] {len(releases)} new release(s)")
 
-            for release in releases:
+            async def _process_one(release, _eco=eco):
                 click.echo(f"    📦 {release.name} {release.version}")
-                if no_analyze:
-                    continue
-
-                # Download & analyze
+                if no_analyze or not release.previous_version:
+                    return
                 try:
                     async with _sem:
-                     with tempfile.TemporaryDirectory() as tmpdir:
-                        tmp = Path(tmpdir)
-                        from depvet.differ.downloader import download_package
-                        from depvet.differ.unpacker import unpack
-                        from depvet.differ.diff_generator import generate_diff
+                        with tempfile.TemporaryDirectory() as tmpdir:
+                            tmp = Path(tmpdir)
+                            from depvet.differ.downloader import download_package
+                            from depvet.differ.unpacker import unpack
+                            from depvet.differ.diff_generator import generate_diff
 
-                        if not release.previous_version:
-                            continue
+                            (tmp / "old").mkdir()
+                            (tmp / "new").mkdir()
+                            old_arch = await download_package(release.name, release.previous_version, _eco, tmp / "old")
+                            new_arch = await download_package(release.name, release.version, _eco, tmp / "new")
+                            if not old_arch or not new_arch:
+                                return
 
-                        (tmp / "old").mkdir()
-                        (tmp / "new").mkdir()
-                        old_arch = await download_package(release.name, release.previous_version, eco, tmp / "old")
-                        new_arch = await download_package(release.name, release.version, eco, tmp / "new")
-                        if not old_arch or not new_arch:
-                            continue
+                            old_dir = unpack(old_arch, tmp / "uo")
+                            new_dir = unpack(new_arch, tmp / "un")
+                            chunks, stats = generate_diff(old_dir, new_dir)
 
-                        old_dir = unpack(old_arch, tmp / "uo")
-                        new_dir = unpack(new_arch, tmp / "un")
-                        chunks, stats = generate_diff(old_dir, new_dir)
+                            if not chunks:
+                                return
 
-                        if not chunks:
-                            continue
+                            triage = TriageAnalyzer(analyzer)
+                            should, reason, rule_matches = await triage.should_analyze(
+                                chunks, release.name, release.previous_version, release.version
+                            )
+                            if not should:
+                                return
 
-                        triage = TriageAnalyzer(analyzer)
-                        should, reason, _rule_matches = await triage.should_analyze(
-                            chunks, release.name, release.previous_version, release.version
-                        )
-                        if not should:
-                            continue
+                            deep = DeepAnalyzer(analyzer)
+                            verdict = await deep.analyze(
+                                chunks=chunks,
+                                package_name=release.name,
+                                old_version=release.previous_version,
+                                new_version=release.version,
+                                ecosystem=_eco,
+                                diff_stats=stats,
+                                rule_matches=rule_matches,
+                            )
 
-                        deep = DeepAnalyzer(analyzer)
-                        verdict = await deep.analyze(
-                            chunks=chunks,
-                            package_name=release.name,
-                            old_version=release.previous_version,
-                            new_version=release.version,
-                            ecosystem=eco,
-                            diff_stats=stats,
-                        )
-
-                        event = AlertEvent(release=release, verdict=verdict)
-                        await router.dispatch(event)
-
+                            event = AlertEvent(release=release, verdict=verdict)
+                            await router.dispatch(event)
                 except Exception as e:
                     logger.error(f"Analysis failed for {release.name}: {e}")
+
+            if releases:
+                tasks = [asyncio.create_task(_process_one(r)) for r in releases]
+                await asyncio.gather(*tasks)
 
         if once:
             break
@@ -604,10 +619,17 @@ def watchlist_import(ctx, sbom_path):
 
 @watchlist.command("add")
 @click.argument("name")
-@click.option("--ecosystem", "-e", default="pypi", type=click.Choice(["pypi", "npm", "go", "cargo"]))
+@click.option("--ecosystem", "-e", default="pypi",
+              type=click.Choice(["pypi", "npm", "go", "cargo", "maven"]))
 @click.pass_context
 def watchlist_add(ctx, name, ecosystem):
     """Add a package to the watchlist."""
+    if ecosystem == "maven":
+        click.echo(
+            "⚠️  Maven is supported for SBOM import and watchlist tracking, "
+            "but scan/diff/download is not yet implemented.",
+            err=True,
+        )
     from depvet.watchlist.manager import WatchlistManager
     wl = WatchlistManager()
     wl.add(name, ecosystem)
@@ -616,7 +638,8 @@ def watchlist_add(ctx, name, ecosystem):
 
 @watchlist.command("remove")
 @click.argument("name")
-@click.option("--ecosystem", "-e", default="pypi", type=click.Choice(["pypi", "npm", "go", "cargo"]))
+@click.option("--ecosystem", "-e", default="pypi",
+              type=click.Choice(["pypi", "npm", "go", "cargo", "maven"]))
 @click.pass_context
 def watchlist_remove(ctx, name, ecosystem):
     """Remove a package from the watchlist."""
