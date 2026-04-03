@@ -209,38 +209,18 @@ class TestConfigWiring24:
 # ─── Issue #25: ecosystem-specific URLs ──────────────────────────────────────
 
 class TestEcosystemUrls:
-    def test_go_url_used_for_go_ecosystem(self):
-        """_scan must use pkg.go.dev URL for go packages."""
-        import depvet.cli as m
-        import pathlib
-        src = pathlib.Path(m.__file__).read_text()
-        scan_section = src[src.find("async def _scan"):src.find("async def _diff")]
-        assert "pkg.go.dev" in scan_section, (
-            "_scan must use pkg.go.dev URL for go ecosystem"
-        )
+    def test_go_url(self):
+        from depvet.cli import _build_release_url
+        assert "pkg.go.dev" in _build_release_url("github.com/foo/bar", "v1.0.0", "go")
 
-    def test_cargo_url_used_for_cargo_ecosystem(self):
-        """_scan must use crates.io URL for cargo packages."""
-        import depvet.cli as m
-        import pathlib
-        src = pathlib.Path(m.__file__).read_text()
-        scan_section = src[src.find("async def _scan"):src.find("async def _diff")]
-        assert "crates.io" in scan_section, (
-            "_scan must use crates.io URL for cargo ecosystem"
-        )
+    def test_cargo_url(self):
+        from depvet.cli import _build_release_url
+        assert "crates.io" in _build_release_url("serde", "1.0.0", "cargo")
 
-    def test_npm_url_used_for_npm_ecosystem(self):
-        """_scan must use npmjs.com URL for npm packages."""
-        import depvet.cli as m
-        import pathlib
-        src = pathlib.Path(m.__file__).read_text()
-        scan_section = src[src.find("async def _scan"):src.find("async def _diff")]
-        assert "npmjs.com" in scan_section, "_scan must use npmjs.com URL for npm"
+    def test_npm_url(self):
+        from depvet.cli import _build_release_url
+        assert "npmjs.com" in _build_release_url("lodash", "4.17.21", "npm")
 
-    def test_pypi_url_used_for_pypi_ecosystem(self):
-        """_scan must use pypi.org URL for pypi packages."""
-        import depvet.cli as m
-        import pathlib
-        src = pathlib.Path(m.__file__).read_text()
-        scan_section = src[src.find("async def _scan"):src.find("async def _diff")]
-        assert "pypi.org" in scan_section, "_scan must use pypi.org URL for pypi"
+    def test_pypi_url(self):
+        from depvet.cli import _build_release_url
+        assert "pypi.org" in _build_release_url("requests", "2.32.0", "pypi")

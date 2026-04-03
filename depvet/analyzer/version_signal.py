@@ -40,6 +40,39 @@ def _is_security_package(name: str) -> bool:
         any(kw in name_lower for kw in ("crypto", "ssl", "tls", "auth", "cipher", "hash", "sign"))
     )
 
+def _parse_timestamp(ts_str: str) -> Optional[datetime]:
+    """Parse ISO 8601 timestamp string, handling Z suffix and fractional seconds."""
+    try:
+        return datetime.fromisoformat(ts_str.rstrip("Z").split("+")[0].split(".")[0])
+    except (ValueError, AttributeError):
+        return None
+
+
+def _detect_dormancy(
+    name: str,
+    gap_days: int,
+    ctx: "VersionTransitionContext",
+) -> None:
+    """Add dormancy signals to ctx based on gap_days. Skips security packages."""
+    if _is_security_package(name):
+        return
+    if gap_days > 365:
+        ctx.signals.append(VersionSignal(
+            signal_id="LONG_DORMANCY",
+            description=f"前回リリースから{gap_days}日ぶりの更新（休眠パッケージの復活）",
+            severity="HIGH",
+            confidence_boost=0.15,
+        ))
+    elif gap_days > 180:
+        ctx.signals.append(VersionSignal(
+            signal_id="MEDIUM_DORMANCY",
+            description=f"前回リリースから{gap_days}日ぶりの更新",
+            severity="MEDIUM",
+            confidence_boost=0.08,
+        ))
+
+
+
 
 @dataclass
 class VersionSignal:
@@ -122,21 +155,7 @@ async def analyze_pypi_transition(
         gap_days = (new_ts - old_ts).days
         ctx.days_since_last_release = gap_days
         # Security packages have naturally long release cycles — don't penalize
-        if not _is_security_package(name):
-            if gap_days > 365:
-                ctx.signals.append(VersionSignal(
-                    signal_id="LONG_DORMANCY",
-                    description=f"前回リリースから{gap_days}日ぶりの更新（休眠パッケージの復活）",
-                    severity="HIGH",
-                    confidence_boost=0.15,
-                ))
-            elif gap_days > 180:
-                ctx.signals.append(VersionSignal(
-                    signal_id="MEDIUM_DORMANCY",
-                    description=f"前回リリースから{gap_days}日ぶりの更新",
-                    severity="MEDIUM",
-                    confidence_boost=0.08,
-                ))
+        _detect_dormancy(name, gap_days, ctx)
 
     # --- Signal: Maintainer change ---
     old_info = await _get_version_info_pypi(name, old_version)
@@ -212,13 +231,7 @@ async def analyze_npm_transition(
             new_ts = datetime.fromisoformat(new_ts_str.replace("Z", "+00:00"))
             gap_days = (new_ts - old_ts).days
             ctx.days_since_last_release = gap_days
-            if not _is_security_package(name) and gap_days > 365:
-                ctx.signals.append(VersionSignal(
-                    signal_id="LONG_DORMANCY",
-                    description=f"前回リリースから{gap_days}日ぶりの更新（休眠パッケージの復活）",
-                    severity="HIGH",
-                    confidence_boost=0.15,
-                ))
+            _detect_dormancy(name, gap_days, ctx)
         except Exception:
             pass
 
@@ -538,20 +551,8 @@ async def analyze_go_transition(
                     new_ts = datetime.fromisoformat(new_ts_str.replace("Z", "+00:00"))
                     gap_days = (new_ts - old_ts).days
                     ctx.days_since_last_release = gap_days
-                    if not _is_security_package(name) and gap_days > 365:
-                        ctx.signals.append(VersionSignal(
-                            signal_id="LONG_DORMANCY",
-                            description=f"前回リリースから{gap_days}日ぶりの更新（Go module 休眠復活）",
-                            severity="HIGH",
-                            confidence_boost=0.15,
-                        ))
-                    elif not _is_security_package(name) and gap_days > 180:
-                        ctx.signals.append(VersionSignal(
-                            signal_id="MEDIUM_DORMANCY",
-                            description=f"前回リリースから{gap_days}日ぶりの更新",
-                            severity="MEDIUM",
-                            confidence_boost=0.08,
-                        ))
+                    _detect_dormancy(name, gap_days, ctx)
+
                 except Exception:
                     pass
 
@@ -620,20 +621,7 @@ async def analyze_cargo_transition(
                         new_ts = datetime.fromisoformat(new_ts_str.rstrip("Z").split("+")[0])
                         gap_days = (new_ts - old_ts).days
                         ctx.days_since_last_release = gap_days
-                        if not _is_security_package(name) and gap_days > 365:
-                            ctx.signals.append(VersionSignal(
-                                signal_id="LONG_DORMANCY",
-                                description=f"前回リリースから{gap_days}日ぶりの更新（Cargo crate 休眠復活）",
-                                severity="HIGH",
-                                confidence_boost=0.15,
-                            ))
-                        elif not _is_security_package(name) and gap_days > 180:
-                            ctx.signals.append(VersionSignal(
-                                signal_id="MEDIUM_DORMANCY",
-                                description=f"前回リリースから{gap_days}日ぶりの更新",
-                                severity="MEDIUM",
-                                confidence_boost=0.08,
-                            ))
+                        _detect_dormancy(name, gap_days, ctx)
                     except Exception:
                         pass
 

@@ -83,6 +83,19 @@ def _get_analyzer(config):
         )
 
 
+
+def _build_release_url(name: str, version: str, ecosystem: str) -> str:
+    """Build registry URL for a package release."""
+    if ecosystem == "pypi":
+        return f"https://pypi.org/project/{name}/{version}/"
+    elif ecosystem == "go":
+        return f"https://pkg.go.dev/{name}@{version}"
+    elif ecosystem == "cargo":
+        return f"https://crates.io/crates/{name}/{version}"
+    else:  # npm + default
+        return f"https://www.npmjs.com/package/{name}/v/{version}"
+
+
 @click.group()
 @click.version_option(__version__, prog_name="depvet")
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose logging")
@@ -212,15 +225,7 @@ async def _scan(config, package, old_version, new_version, ecosystem, json_outpu
             ecosystem=ecosystem,
             previous_version=old_version,
             published_at=datetime.now(timezone.utc).isoformat(),
-            url=(
-                f"https://pypi.org/project/{package}/{new_version}/"
-                if ecosystem == "pypi"
-                else f"https://pkg.go.dev/{package}@{new_version}"
-                if ecosystem == "go"
-                else f"https://crates.io/crates/{package}/{new_version}"
-                if ecosystem == "cargo"
-                else f"https://www.npmjs.com/package/{package}/v/{new_version}"
-            ),
+            url=_build_release_url(package, new_version, ecosystem),
         )
         event = AlertEvent(release=release, verdict=verdict)
 
