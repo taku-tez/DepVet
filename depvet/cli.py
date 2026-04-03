@@ -212,13 +212,19 @@ async def _scan(config, package, old_version, new_version, ecosystem, json_outpu
             ecosystem=ecosystem,
             previous_version=old_version,
             published_at=datetime.now(timezone.utc).isoformat(),
-            url=(f"https://pypi.org/project/{package}/{new_version}/"
-                 if ecosystem == "pypi"
-                 else f"https://www.npmjs.com/package/{package}/v/{new_version}"),
+            url=(
+                f"https://pypi.org/project/{package}/{new_version}/"
+                if ecosystem == "pypi"
+                else f"https://pkg.go.dev/{package}@{new_version}"
+                if ecosystem == "go"
+                else f"https://crates.io/crates/{package}/{new_version}"
+                if ecosystem == "cargo"
+                else f"https://www.npmjs.com/package/{package}/v/{new_version}"
+            ),
         )
         event = AlertEvent(release=release, verdict=verdict)
 
-        alerter = StdoutAlerter(json_mode=json_output)
+        alerter = StdoutAlerter(json_mode=json_output, min_severity="NONE")  # scan always outputs
         await alerter.send(event)
 
 
@@ -329,7 +335,7 @@ async def _analyze(config, diff_file, json_output, package, old_version, new_ver
         url="",
     )
     event = AlertEvent(release=release, verdict=verdict)
-    alerter = StdoutAlerter(json_mode=json_output)
+    alerter = StdoutAlerter(json_mode=json_output, min_severity="NONE")  # analyze always outputs
     await alerter.send(event)
 
 
@@ -375,9 +381,12 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
     state = PollingState(config.state.path)
     wl = WatchlistManager()
 
-    if sbom:
-        count = wl.import_from_sbom(sbom)
-        click.echo(f"📋 Imported {count} packages from SBOM")
+    # Wire config.watchlist.sbom_path (auto-load SBOM if configured and not overridden by CLI)
+    effective_sbom = sbom or config.watchlist.sbom_path
+    if effective_sbom:
+        sbom_fmt = getattr(config.watchlist, 'sbom_format', None)
+        count = wl.import_from_sbom(effective_sbom, fmt=sbom_fmt if sbom_fmt != 'cyclonedx' else None)
+        click.echo(f"📋 Imported {count} packages from SBOM ({effective_sbom})")
 
     # Build monitor list from config.monitor.ecosystems + CLI flags
     active_ecosystems = set(config.monitor.ecosystems)
@@ -431,8 +440,10 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
         ))
 
     analyzer = _get_analyzer(config) if not no_analyze else None
-    # Semaphore to limit concurrent analyses per config
+    # Semaphore: limits concurrent analyses
     _sem = asyncio.Semaphore(config.monitor.max_concurrent_analyses)
+    # Queue: backpressure via queue_max_size (0 = unlimited)
+    _queue: asyncio.Queue = asyncio.Queue(maxsize=config.monitor.queue_max_size)
 
     click.echo(f"🚀 Starting monitor (interval={interval}s, ecosystems={[m.ecosystem for m in monitors]})")
     click.echo(f"   Watchlist: {wl.stats()}")
@@ -485,6 +496,15 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                             if not should:
                                 return
 
+                            # Fetch version transition context (same as scan path)
+                            from depvet.analyzer.version_signal import get_transition_context
+                            version_ctx = await get_transition_context(
+                                release.name,
+                                release.previous_version,
+                                release.version,
+                                _eco,
+                            )
+
                             deep = DeepAnalyzer(analyzer)
                             verdict = await deep.analyze(
                                 chunks=chunks,
@@ -494,6 +514,7 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                                 ecosystem=_eco,
                                 diff_stats=stats,
                                 rule_matches=rule_matches,
+                                version_context=version_ctx,
                             )
 
                             event = AlertEvent(release=release, verdict=verdict)
@@ -502,8 +523,17 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                     logger.error(f"Analysis failed for {release.name}: {e}")
 
             if releases:
-                tasks = [asyncio.create_task(_process_one(r)) for r in releases]
-                await asyncio.gather(*tasks)
+                # Put releases into the bounded queue (blocks if queue full = backpressure)
+                for r in releases:
+                    await _queue.put(r)
+                # Drain queue: process up to queue_max_size concurrent tasks
+                tasks = []
+                while not _queue.empty():
+                    r = _queue.get_nowait()
+                    tasks.append(asyncio.create_task(_process_one(r)))
+                    _queue.task_done()
+                if tasks:
+                    await asyncio.gather(*tasks)
 
         if once:
             break
@@ -533,8 +563,8 @@ async def _validate(sbom_path, sbom_format, check_osv, json_output):
     from depvet.known_bad.osv import OSVChecker
 
     parser = SBOMParser()
-    entries = parser.parse(sbom_path)
-    click.echo(f"📋 Parsed {len(entries)} packages from SBOM")
+    entries = parser.parse(sbom_path, fmt=sbom_format)
+    click.echo(f"📋 Parsed {len(entries)} packages from SBOM (format={sbom_format})")
 
     if not entries:
         click.echo("⚠️  No packages found in SBOM")

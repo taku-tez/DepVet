@@ -60,10 +60,10 @@ class WatchlistManager:
             self._save()
         return result
 
-    def import_from_sbom(self, path: str) -> int:
+    def import_from_sbom(self, path: str, fmt: str | None = None) -> int:
         from depvet.watchlist.sbom import SBOMParser
         parser = SBOMParser()
-        entries = parser.parse(path)
+        entries = parser.parse(path, fmt=fmt)
         for entry in entries:
             self._explicit.add(entry.name, entry.ecosystem)
         self._save()

@@ -63,10 +63,41 @@ def _infer_fallback_entry(
 
 
 class SBOMParser:
-    def parse(self, path: str) -> list[WatchlistEntry]:
+    def parse(self, path: str, fmt: Optional[str] = None) -> list[WatchlistEntry]:
+        """Parse a SBOM file.
+
+        Args:
+            path: Path to the SBOM file.
+            fmt: Explicit format override: 'cyclonedx' | 'spdx' | None (auto-detect).
+        """
         p = Path(path)
         content = p.read_text(encoding="utf-8", errors="replace")
-        if path.endswith(".xml") or content.strip().startswith("<"):
+        is_xml = path.endswith(".xml") or content.strip().startswith("<")
+
+        # Explicit format override
+        if fmt:
+            fmt_lower = fmt.lower()
+            if is_xml:
+                if fmt_lower == "spdx":
+                    return self._parse_spdx_xml(content)
+                else:  # cyclonedx or default
+                    return self._parse_cyclonedx_xml(content)
+            else:
+                try:
+                    data = json.loads(content)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse SBOM JSON: {e}")
+                    return []
+                if fmt_lower == "spdx":
+                    return self._parse_spdx_json(data)
+                else:
+                    return self._parse_cyclonedx_json(data)
+
+        # Auto-detect
+        if is_xml:
+            # Peek at root element to decide CycloneDX vs SPDX
+            if "spdx" in content[:500].lower() or "SpdxDocument" in content[:500]:
+                return self._parse_spdx_xml(content)
             return self._parse_cyclonedx_xml(content)
         try:
             data = json.loads(content)
@@ -106,7 +137,8 @@ class SBOMParser:
         entries = []
         try:
             root = ET.fromstring(content)
-            for ns_uri in ["http://cyclonedx.org/schema/bom/1.4", "http://cyclonedx.org/schema/bom/1.3", ""]:
+            for ns_uri in ["http://cyclonedx.org/schema/bom/1.4", "http://cyclonedx.org/schema/bom/1.3",
+                           "http://cyclonedx.org/schema/bom/1.5", ""]:
                 prefix = f"{{{ns_uri}}}" if ns_uri else ""
                 components = root.findall(f".//{prefix}component")
                 if components:
@@ -116,9 +148,63 @@ class SBOMParser:
                             entry = _parse_purl(purl_el.text)
                             if entry:
                                 entries.append(entry)
+                                continue
+                        # Fallback: group + name + version
+                        name_el = comp.find(f"{prefix}name")
+                        ver_el = comp.find(f"{prefix}version")
+                        grp_el = comp.find(f"{prefix}group")
+                        if name_el is not None and name_el.text:
+                            name = name_el.text
+                            version = ver_el.text if ver_el is not None else ""
+                            group = grp_el.text if grp_el is not None else ""
+                            entry = _infer_fallback_entry(name=name, version=version, group=group)
+                            if entry:
+                                entries.append(entry)
                     break
         except ET.ParseError as e:
             logger.error(f"XML parse error: {e}")
+        return entries
+
+    def _parse_spdx_xml(self, content: str) -> list[WatchlistEntry]:
+        """Parse SPDX XML format."""
+        import xml.etree.ElementTree as ET
+        entries = []
+        try:
+            root = ET.fromstring(content)
+            # SPDX XML namespaces vary — try common ones
+            for ns_uri in [
+                "http://spdx.org/spdx/v2.3/document",
+                "http://spdx.org/spdx/v2.2/document",
+                "",
+            ]:
+                prefix = f"{{{ns_uri}}}" if ns_uri else ""
+                packages = root.findall(f".//{prefix}package")
+                if not packages:
+                    # Try without namespace
+                    packages = root.findall(".//package")
+                for pkg in packages:
+                    # Try externalRef with purl
+                    for ref in pkg.findall(f"{prefix}externalRef") or pkg.findall(".//externalRef"):
+                        ref_type = ref.findtext(f"{prefix}referenceType") or ref.findtext("referenceType") or ""
+                        if "purl" in ref_type.lower():
+                            locator = ref.findtext(f"{prefix}referenceLocator") or ref.findtext("referenceLocator") or ""
+                            if locator:
+                                entry = _parse_purl(locator)
+                                if entry:
+                                    entries.append(entry)
+                                    break
+                    else:
+                        # Fallback: name + versionInfo
+                        name = pkg.findtext(f"{prefix}name") or pkg.findtext("name") or ""
+                        version = pkg.findtext(f"{prefix}versionInfo") or pkg.findtext("versionInfo") or ""
+                        if name and name not in ("NOASSERTION", "SPDXRef-DOCUMENT"):
+                            entry = _infer_fallback_entry(name=name, version=version)
+                            if entry:
+                                entries.append(entry)
+                if entries:
+                    break
+        except ET.ParseError as e:
+            logger.error(f"SPDX XML parse error: {e}")
         return entries
 
     def _parse_spdx_json(self, data: dict) -> list[WatchlistEntry]:
