@@ -148,14 +148,12 @@ class TestSecurityPackageDormancy:
         )
 
     def test_security_package_dormancy_logic(self):
-        """_is_security_package controls the dormancy gate."""
-        # The guard is: if not _is_security_package(name): add signal
-        # Verified by checking _is_security_package returns correct values above
-        # Integration test via mocking is complex; verify the source uses the guard
+        """_detect_dormancy() skips security packages via _is_security_package()."""
         import inspect
         from depvet.analyzer import version_signal as vs_mod
-        src = inspect.getsource(vs_mod.analyze_pypi_transition)
-        assert "_is_security_package" in src, "analyze_pypi_transition must call _is_security_package"
+        # Now dormancy is centralized in _detect_dormancy()
+        src = inspect.getsource(vs_mod._detect_dormancy)
+        assert "_is_security_package" in src, "_detect_dormancy must call _is_security_package"
 
 
 # ─── Issue #15: config wiring ────────────────────────────────────────────────
