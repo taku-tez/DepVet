@@ -167,7 +167,7 @@ class TestScanAnalyzeAlwaysOutputs:
         # This bypasses AlertRouter which always skips BENIGN
         # Key: StdoutAlerter.send() respects its own min_severity, not router logic
         from depvet.alert.stdout import StdoutAlerter
-        alerter = StdoutAlerter(min_severity="NONE")
+        _ = StdoutAlerter(min_severity="NONE")  # verify constructor works
         # SEVERITY_ORDER[NONE] == 0, so any verdict passes
         from depvet.alert.stdout import SEVERITY_ORDER
         from depvet.models.verdict import Severity

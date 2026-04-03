@@ -166,16 +166,24 @@ def extract_new_dependencies(diff_content: str, filepath: str = "") -> list[NewD
     Supports:
     - package.json (npm)
     - pyproject.toml / setup.cfg / requirements.txt (PyPI)
+    - go.mod / go.sum (Go)
+    - Cargo.toml (Cargo/Rust)
     """
     fname = filepath.lower()
 
     if "package.json" in fname:
         return _extract_npm_deps(diff_content, filepath)
 
+    if "go.mod" in fname or "go.sum" in fname:
+        return _extract_go_deps(diff_content, filepath)
+
+    if "cargo.toml" in fname:
+        return _extract_cargo_deps(diff_content, filepath)
+
     if any(fname.endswith(ext) for ext in (".toml", ".cfg", ".txt", "requirements")):
         return _extract_pypi_deps(diff_content, filepath)
 
-    # Try both if unknown
+    # Try all if unknown
     npm = _extract_npm_deps(diff_content, filepath)
     pypi = _extract_pypi_deps(diff_content, filepath)
     return npm + pypi
@@ -205,3 +213,149 @@ def deps_to_watchlist_entries(deps: list[NewDependency]) -> list[tuple[str, str]
             continue
         results.append((dep.name, dep.ecosystem))
     return results
+
+
+# ─── Go / go.mod ───────────────────────────────────────────────────────────
+
+# go.mod: require github.com/user/repo v1.2.3
+_GO_REQUIRE_RE = re.compile(
+    r"""^\s*(?P<module>[a-zA-Z0-9_.\-/]+\.[a-zA-Z]{2,}[a-zA-Z0-9_.\-/]*)\s+v?(?P<version>[^\s]+)"""
+)
+
+
+def _extract_go_deps(diff_content: str, filepath: str = "go.mod") -> list[NewDependency]:
+    """Extract newly added Go dependencies from go.mod diffs."""
+    deps: list[NewDependency] = []
+    in_require_block = False
+    is_indirect = False
+    line_number = 0
+
+    for raw in diff_content.splitlines():
+        line_number += 1
+
+        # Track require ( ... ) block
+        stripped = raw.lstrip("+ ")
+        if "require" in stripped and "(" in stripped:
+            in_require_block = True
+            continue
+        if in_require_block and stripped.strip() == ")":
+            in_require_block = False
+            continue
+
+        if not raw.startswith("+") or raw.startswith("+++"):
+            continue
+
+        line = raw[1:].strip()
+        if not line or line.startswith("//"):
+            continue
+
+        # Single-line require: require github.com/foo/bar v1.0.0
+        if line.startswith("require "):
+            line = line[len("require "):].strip()
+
+        # Check for // indirect marker
+        is_indirect = "// indirect" in line
+
+        m = _GO_REQUIRE_RE.match(line)
+        if m:
+            module = m.group("module")
+            version = m.group("version")
+            # Skip go directive, toolchain, etc.
+            if module in ("go", "toolchain") or "." not in module:
+                continue
+            deps.append(NewDependency(
+                name=module,
+                version_spec=version,
+                ecosystem="go",
+                manifest_file=filepath,
+                is_dev=is_indirect,  # indirect ≈ dev (transitive)
+                line_number=line_number,
+            ))
+
+    return deps
+
+
+# ─── Cargo / Cargo.toml ────────────────────────────────────────────────────
+
+# Cargo.toml: package_name = "version" or package_name = { version = "1.0" }
+_CARGO_SIMPLE_RE = re.compile(
+    r"""^(?P<name>[a-zA-Z0-9_\-]+)\s*=\s*"(?P<version>[^"]+)"\s*$"""
+)
+_CARGO_TABLE_RE = re.compile(
+    r"""^(?P<name>[a-zA-Z0-9_\-]+)\s*=\s*\{"""
+)
+_CARGO_VERSION_IN_TABLE_RE = re.compile(
+    r'version\s*=\s*"(?P<version>[^"]+)"'
+)
+
+# Cargo.toml metadata keys that are NOT crate names
+_CARGO_METADATA_KEYS = frozenset({
+    "name", "version", "edition", "authors", "description", "license",
+    "repository", "homepage", "documentation", "readme", "keywords",
+    "categories", "build", "links", "resolver", "publish", "workspace",
+    "rust-version", "exclude", "include", "autobins", "autoexamples",
+    "autotests", "autobenches", "default-run",
+})
+
+
+def _extract_cargo_deps(diff_content: str, filepath: str = "Cargo.toml") -> list[NewDependency]:
+    """Extract newly added Cargo dependencies from Cargo.toml diffs."""
+    deps: list[NewDependency] = []
+    is_dep_section = False
+    is_dev = False
+    line_number = 0
+
+    for raw in diff_content.splitlines():
+        line_number += 1
+
+        # Track section: [dependencies], [dev-dependencies], [build-dependencies]
+        stripped = raw.lstrip("+ ")
+        if stripped.startswith("["):
+            section = stripped.strip("[]").strip().lower()
+            is_dep_section = "dependencies" in section
+            is_dev = "dev" in section or "build" in section
+            continue
+
+        if not raw.startswith("+") or raw.startswith("+++"):
+            continue
+
+        line = raw[1:].strip()
+        if not line or line.startswith("#"):
+            continue
+
+        if not is_dep_section:
+            continue
+
+        # Simple format: serde = "1.0"
+        m = _CARGO_SIMPLE_RE.match(line)
+        if m:
+            name = m.group("name")
+            version = m.group("version")
+            if name.lower() not in _CARGO_METADATA_KEYS and len(name) > 1:
+                deps.append(NewDependency(
+                    name=name,
+                    version_spec=version,
+                    ecosystem="cargo",
+                    manifest_file=filepath,
+                    is_dev=is_dev,
+                    line_number=line_number,
+                ))
+            continue
+
+        # Table format: serde = { version = "1.0", features = ["derive"] }
+        m2 = _CARGO_TABLE_RE.match(line)
+        if m2:
+            name = m2.group("name")
+            vm = _CARGO_VERSION_IN_TABLE_RE.search(line)
+            version = vm.group("version") if vm else ""
+            if name.lower() not in _CARGO_METADATA_KEYS and len(name) > 1:
+                deps.append(NewDependency(
+                    name=name,
+                    version_spec=version,
+                    ecosystem="cargo",
+                    manifest_file=filepath,
+                    is_dev=is_dev,
+                    line_number=line_number,
+                ))
+
+    return deps
