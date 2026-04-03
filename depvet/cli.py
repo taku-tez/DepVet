@@ -385,8 +385,11 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
     state = PollingState(config.state.path)
     wl = WatchlistManager()
 
-    # Wire config.watchlist.sbom_path (auto-load SBOM if configured and not overridden by CLI)
-    effective_sbom = sbom or config.watchlist.sbom_path
+    # Resolve watchlist sources: 'sbom' source needed for config sbom_path auto-import
+    # CLI --sbom always overrides; config.watchlist.sbom_path only used if 'sbom' in sources
+    effective_sbom = sbom  # CLI --sbom takes priority
+    if not effective_sbom and "sbom" in config.watchlist.sources and config.watchlist.sbom_path:
+        effective_sbom = config.watchlist.sbom_path
     if effective_sbom:
         sbom_fmt = getattr(config.watchlist, 'sbom_format', None)
         count = wl.import_from_sbom(effective_sbom, fmt=sbom_fmt if sbom_fmt != 'cyclonedx' else None)
@@ -458,10 +461,10 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
         ))
 
     analyzer = _get_analyzer(config) if not no_analyze else None
-    # Semaphore: limits concurrent analyses
+    # Semaphore: limits max concurrent analyses
     _sem = asyncio.Semaphore(config.monitor.max_concurrent_analyses)
-    # Queue: backpressure via queue_max_size (0 = unlimited)
-    _queue: asyncio.Queue = asyncio.Queue(maxsize=config.monitor.queue_max_size)
+    # queue_max_size: max releases to process per poll cycle (0 = unlimited)
+    _batch_limit = config.monitor.queue_max_size  # renamed for clarity
 
     click.echo(f"🚀 Starting monitor (interval={interval}s, ecosystems={[m.ecosystem for m in monitors]})")
     click.echo(f"   Watchlist: {wl.stats()}")
@@ -477,8 +480,12 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
 
         for mon in monitors:
             eco = mon.ecosystem
-            # Merge explicit watchlist with ephemeral top-N (top-N is NOT persisted)
-            watchlist_set = wl.as_set(eco) | ephemeral_top.get(eco, set())
+            # Build watchlist according to active sources
+            # 'explicit': use persisted watchlist; 'top_n': use ephemeral top-N
+            # If sources is empty or contains 'explicit', always include explicit entries
+            use_explicit = not config.watchlist.sources or "explicit" in config.watchlist.sources
+            explicit_set = wl.as_set(eco) if use_explicit else set()
+            watchlist_set = explicit_set | ephemeral_top.get(eco, set())
             if not watchlist_set:
                 continue
 
@@ -572,17 +579,11 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                     logger.error(f"Analysis failed for {release.name}: {e}")
 
             if releases:
-                # Put releases into the bounded queue (blocks if queue full = backpressure)
-                for r in releases:
-                    await _queue.put(r)
-                # Drain queue: process up to queue_max_size concurrent tasks
-                tasks = []
-                while not _queue.empty():
-                    r = _queue.get_nowait()
-                    tasks.append(asyncio.create_task(_process_one(r)))
-                    _queue.task_done()
-                if tasks:
-                    await asyncio.gather(*tasks)
+                # Apply batch limit: process at most _batch_limit releases per cycle
+                # (0 = unlimited)
+                batch = releases if _batch_limit <= 0 else releases[:_batch_limit]
+                tasks = [asyncio.create_task(_process_one(r)) for r in batch]
+                await asyncio.gather(*tasks)
 
         if once:
             break
