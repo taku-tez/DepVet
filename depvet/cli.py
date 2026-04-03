@@ -134,7 +134,7 @@ async def _scan(config, package, old_version, new_version, ecosystem, json_outpu
     from depvet.differ.diff_generator import generate_diff
     from depvet.analyzer.triage import TriageAnalyzer
     from depvet.analyzer.deep import DeepAnalyzer
-    from depvet.alert.stdout import StdoutAlert
+    from depvet.alert.stdout import StdoutAlerter
     from depvet.models.alert import AlertEvent
     from depvet.models.package import Release
     from datetime import datetime, timezone
@@ -145,10 +145,10 @@ async def _scan(config, package, old_version, new_version, ecosystem, json_outpu
         tmp = Path(tmpdir)
 
         click.echo("  Downloading packages...")
-        old_archive = await download_package(package, old_version, ecosystem, tmp / "old")
         (tmp / "old").mkdir(parents=True, exist_ok=True)
-        new_archive = await download_package(package, new_version, ecosystem, tmp / "new")
         (tmp / "new").mkdir(parents=True, exist_ok=True)
+        old_archive = await download_package(package, old_version, ecosystem, tmp / "old")
+        new_archive = await download_package(package, new_version, ecosystem, tmp / "new")
 
         if not old_archive or not new_archive:
             click.echo("❌ Failed to download one or both versions", err=True)
@@ -216,8 +216,8 @@ async def _scan(config, package, old_version, new_version, ecosystem, json_outpu
         )
         event = AlertEvent(release=release, verdict=verdict)
 
-        alerter = StdoutAlert()
-        alerter.send(event)
+        alerter = StdoutAlerter(json_mode=json_output)
+        await alerter.send(event)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -293,7 +293,7 @@ def analyze(ctx, diff_file, json_output, model, package, old_version, new_versio
 async def _analyze(config, diff_file, json_output, package, old_version, new_version, ecosystem):
     from depvet.differ.chunker import DiffChunker, DiffFile
     from depvet.analyzer.deep import DeepAnalyzer
-    from depvet.alert.stdout import StdoutAlert
+    from depvet.alert.stdout import StdoutAlerter
     from depvet.models.alert import AlertEvent
     from depvet.models.package import Release
     from depvet.models.verdict import DiffStats
@@ -325,8 +325,8 @@ async def _analyze(config, diff_file, json_output, package, old_version, new_ver
         url="",
     )
     event = AlertEvent(release=release, verdict=verdict)
-    alerter = StdoutAlert()
-    alerter.send(event)
+    alerter = StdoutAlerter(json_mode=json_output)
+    await alerter.send(event)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -355,6 +355,9 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
     from depvet.registry.state import PollingState
     from depvet.watchlist.manager import WatchlistManager
     from depvet.alert.router import AlertRouter
+    from depvet.alert.stdout import StdoutAlerter
+    from depvet.alert.slack import SlackAlerter
+    from depvet.alert.webhook import WebhookAlerter
     from depvet.analyzer.triage import TriageAnalyzer
     from depvet.analyzer.deep import DeepAnalyzer
     from depvet.models.alert import AlertEvent
@@ -386,11 +389,16 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
             click.echo(f"  → {len(pkgs)} packages added")
 
     # Alert router
-    slack_webhook = os.environ.get(config.alert.slack_webhook_env) if slack else None
-    router = AlertRouter(
-        min_severity=config.alert.min_severity,
-        slack_webhook=slack_webhook,
-    )
+    router = AlertRouter(min_severity=config.alert.min_severity)
+    router.register(StdoutAlerter())
+    if slack:
+        slack_webhook = os.environ.get(config.alert.slack_webhook_env)
+        router.register(SlackAlerter(webhook_url=slack_webhook))
+    if config.alert.webhook_url:
+        router.register(WebhookAlerter(
+            url=config.alert.webhook_url,
+            secret_env=config.alert.webhook_secret_env,
+        ))
 
     analyzer = _get_analyzer(config) if not no_analyze else None
 
