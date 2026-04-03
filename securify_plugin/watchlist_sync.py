@@ -54,7 +54,12 @@ class WatchlistSyncJob:
     @staticmethod
     def _tenant_filename(tenant_id: str) -> str:
         sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", tenant_id).strip("._")
-        return sanitized or "tenant"
+        if not sanitized:
+            raise ValueError(
+                f"Invalid tenant_id {tenant_id!r}: becomes empty after sanitization. "
+                "tenant_id must contain at least one alphanumeric character."
+            )
+        return sanitized
 
     def _manager_for_tenant(self, tenant_id: str) -> WatchlistManager:
         manager = self._tenant_watchlists.get(tenant_id)
