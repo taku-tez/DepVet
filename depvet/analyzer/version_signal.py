@@ -121,20 +121,22 @@ async def analyze_pypi_transition(
     if old_ts and new_ts:
         gap_days = (new_ts - old_ts).days
         ctx.days_since_last_release = gap_days
-        if gap_days > 365:
-            ctx.signals.append(VersionSignal(
-                signal_id="LONG_DORMANCY",
-                description=f"前回リリースから{gap_days}日ぶりの更新（休眠パッケージの復活）",
-                severity="HIGH",
-                confidence_boost=0.15,
-            ))
-        elif gap_days > 180:
-            ctx.signals.append(VersionSignal(
-                signal_id="MEDIUM_DORMANCY",
-                description=f"前回リリースから{gap_days}日ぶりの更新",
-                severity="MEDIUM",
-                confidence_boost=0.08,
-            ))
+        # Security packages have naturally long release cycles — don't penalize
+        if not _is_security_package(name):
+            if gap_days > 365:
+                ctx.signals.append(VersionSignal(
+                    signal_id="LONG_DORMANCY",
+                    description=f"前回リリースから{gap_days}日ぶりの更新（休眠パッケージの復活）",
+                    severity="HIGH",
+                    confidence_boost=0.15,
+                ))
+            elif gap_days > 180:
+                ctx.signals.append(VersionSignal(
+                    signal_id="MEDIUM_DORMANCY",
+                    description=f"前回リリースから{gap_days}日ぶりの更新",
+                    severity="MEDIUM",
+                    confidence_boost=0.08,
+                ))
 
     # --- Signal: Maintainer change ---
     old_info = await _get_version_info_pypi(name, old_version)
@@ -210,7 +212,7 @@ async def analyze_npm_transition(
             new_ts = datetime.fromisoformat(new_ts_str.replace("Z", "+00:00"))
             gap_days = (new_ts - old_ts).days
             ctx.days_since_last_release = gap_days
-            if gap_days > 365:
+            if not _is_security_package(name) and gap_days > 365:
                 ctx.signals.append(VersionSignal(
                     signal_id="LONG_DORMANCY",
                     description=f"前回リリースから{gap_days}日ぶりの更新（休眠パッケージの復活）",

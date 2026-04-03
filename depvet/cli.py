@@ -106,6 +106,8 @@ def cli(ctx: click.Context, verbose: bool, config: Optional[str]) -> None:
 @click.argument("new_version")
 @click.option("--npm", "ecosystem", flag_value="npm", help="Use npm ecosystem")
 @click.option("--pypi", "ecosystem", flag_value="pypi", default=True, help="Use PyPI (default)")
+@click.option("--go", "ecosystem", flag_value="go", help="Use Go modules ecosystem")
+@click.option("--cargo", "ecosystem", flag_value="cargo", help="Use Cargo (Rust) ecosystem")
 @click.option("--json", "json_output", is_flag=True, help="Output as JSON")
 @click.option("--model", default=None, help="Override LLM model")
 @click.option("--no-triage", is_flag=True, help="Skip Stage 1 triage")
@@ -230,6 +232,8 @@ async def _scan(config, package, old_version, new_version, ecosystem, json_outpu
 @click.argument("new_version")
 @click.option("--npm", "ecosystem", flag_value="npm")
 @click.option("--pypi", "ecosystem", flag_value="pypi", default=True)
+@click.option("--go", "ecosystem", flag_value="go")
+@click.option("--cargo", "ecosystem", flag_value="cargo")
 @click.option("--output", "-o", type=click.Path(), default=None, help="Output file")
 @click.pass_context
 def diff(ctx, package, old_version, new_version, ecosystem, output):
@@ -346,12 +350,17 @@ async def _analyze(config, diff_file, json_output, package, old_version, new_ver
 def monitor(ctx, top, sbom, interval, once, no_npm, no_pypi, no_analyze, slack):
     """Monitor package registries for new releases."""
     config = ctx.obj["config"]
-    asyncio.run(_monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyze, slack))
+    # CLI flag overrides config; config provides the default
+    effective_interval = interval if interval != 300 else config.monitor.interval
+    effective_top = top if top > 0 else config.watchlist.top_n_pypi
+    asyncio.run(_monitor(config, effective_top, sbom, effective_interval, once, no_npm, no_pypi, no_analyze, slack))
 
 
 async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyze, slack):
     from depvet.registry.pypi import PyPIMonitor
     from depvet.registry.npm import NpmMonitor
+    from depvet.registry.go import GoModulesMonitor
+    from depvet.registry.cargo import CargoMonitor
     from depvet.registry.state import PollingState
     from depvet.watchlist.manager import WatchlistManager
     from depvet.alert.router import AlertRouter
@@ -369,11 +378,17 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
         count = wl.import_from_sbom(sbom)
         click.echo(f"📋 Imported {count} packages from SBOM")
 
+    # Build monitor list from config.monitor.ecosystems + CLI flags
+    active_ecosystems = set(config.monitor.ecosystems)
     monitors = []
-    if not no_pypi:
+    if "pypi" in active_ecosystems and not no_pypi:
         monitors.append(PyPIMonitor())
-    if not no_npm:
+    if "npm" in active_ecosystems and not no_npm:
         monitors.append(NpmMonitor())
+    if "go" in active_ecosystems:
+        monitors.append(GoModulesMonitor())
+    if "cargo" in active_ecosystems:
+        monitors.append(CargoMonitor())
 
     if not monitors:
         click.echo("❌ No ecosystems enabled", err=True)
@@ -401,6 +416,8 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
         ))
 
     analyzer = _get_analyzer(config) if not no_analyze else None
+    # Semaphore to limit concurrent analyses per config
+    _sem = asyncio.Semaphore(config.monitor.max_concurrent_analyses)
 
     click.echo(f"🚀 Starting monitor (interval={interval}s, ecosystems={[m.ecosystem for m in monitors]})")
     click.echo(f"   Watchlist: {wl.stats()}")
@@ -426,7 +443,8 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
 
                 # Download & analyze
                 try:
-                    with tempfile.TemporaryDirectory() as tmpdir:
+                    async with _sem:
+                     with tempfile.TemporaryDirectory() as tmpdir:
                         tmp = Path(tmpdir)
                         from depvet.differ.downloader import download_package
                         from depvet.differ.unpacker import unpack
@@ -491,10 +509,10 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
 @click.pass_context
 def validate(ctx, sbom, fmt, osv, json_output):
     """Validate a SBOM against known malicious releases."""
-    asyncio.run(_validate(sbom, osv, json_output))
+    asyncio.run(_validate(sbom, fmt, osv, json_output))
 
 
-async def _validate(sbom_path, check_osv, json_output):
+async def _validate(sbom_path, sbom_format, check_osv, json_output):
     from depvet.watchlist.sbom import SBOMParser
     from depvet.known_bad.database import KnownBadDB
     from depvet.known_bad.osv import OSVChecker

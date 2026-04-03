@@ -91,6 +91,22 @@ _PYPI_EXTRAS_SECTION_RE = re.compile(
     r'^\[tool\.(?:poetry|hatch|flit)\.dependencies\]|^\[project\]|^\[project\.optional-dependencies\.'
 )
 
+# pyproject.toml / setup.cfg metadata keys — NOT package names
+_PYPI_METADATA_KEYS = frozenset({
+    "name", "version", "description", "readme", "license", "requires-python",
+    "requires_python", "dependencies", "optional-dependencies", "optional_dependencies",
+    "authors", "maintainers", "keywords", "classifiers", "urls", "homepage",
+    "repository", "documentation", "packages", "include", "exclude",
+    "build-backend", "build_backend", "requires",
+    "install_requires", "setup_requires", "tests_require", "extras_require",
+    "python_requires", "long_description", "long_description_content_type",
+    "project_urls", "zip_safe", "package_dir", "package_data", "data_files",
+    "tool", "project", "build-system", "build_system",
+})
+
+# TOML key assignment: key = value or key = [ (not a dep)
+_PYPI_KEY_ASSIGNMENT_RE = re.compile(r'^[A-Za-z0-9_\-]+\s*=')
+
 
 def _extract_pypi_deps(diff_content: str, filepath: str = "pyproject.toml") -> list[NewDependency]:
     """Extract newly added PyPI dependencies from pyproject.toml/setup.cfg/requirements diffs."""
@@ -114,6 +130,13 @@ def _extract_pypi_deps(diff_content: str, filepath: str = "pyproject.toml") -> l
         # Skip comments, blank lines, section headers
         if not line or line.startswith("#") or line.startswith("["):
             continue
+
+        # Skip TOML/cfg key assignments: name = ..., version = ..., requires-python = ...
+        # These are metadata lines, not dependency specifications
+        if _PYPI_KEY_ASSIGNMENT_RE.match(line):
+            key = line.split("=")[0].strip().lower().replace("-", "_")
+            if key in _PYPI_METADATA_KEYS:
+                continue
 
         # pyproject.toml dependencies = ["requests>=2.0", ...]
         # requirements.txt: requests>=2.0
