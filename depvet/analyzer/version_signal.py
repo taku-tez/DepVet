@@ -289,6 +289,10 @@ async def get_transition_context(
             return await analyze_pypi_transition(name, old_version, new_version)
         elif ecosystem == "npm":
             return await analyze_npm_transition(name, old_version, new_version)
+        elif ecosystem == "go":
+            return await analyze_go_transition(name, old_version, new_version)
+        elif ecosystem == "cargo":
+            return await analyze_cargo_transition(name, old_version, new_version)
     except Exception as e:
         logger.warning(f"Version transition analysis failed for {name}: {e}")
     return None
@@ -479,3 +483,176 @@ async def analyze_zero_code_change_signal(
         ))
 
     return signals
+
+
+# ─── Go / crates.io transition analysis ───────────────────────────────────────
+
+GOPROXY_URL = "https://proxy.golang.org"
+CRATESIO_URL = "https://crates.io/api/v1"
+CRATESIO_UA = "DepVet/0.1 (github.com/taku-tez/DepVet)"
+
+
+async def analyze_go_transition(
+    name: str,
+    old_version: str,
+    new_version: str,
+    session: Optional[aiohttp.ClientSession] = None,
+) -> VersionTransitionContext:
+    """Detect suspicious signals in a Go module version transition."""
+    ctx = VersionTransitionContext(
+        package_name=name,
+        ecosystem="go",
+        old_version=old_version,
+        new_version=new_version,
+    )
+    close_session = session is None
+    if session is None:
+        session = aiohttp.ClientSession()
+
+    try:
+        encoded = name.replace("/", "%2F")
+        old_url = f"{GOPROXY_URL}/{encoded}/@v/{old_version}.info"
+        new_url = f"{GOPROXY_URL}/{encoded}/@v/{new_version}.info"
+
+        old_info: Optional[dict] = None
+        new_info: Optional[dict] = None
+
+        for url, target in [(old_url, "old"), (new_url, "new")]:
+            try:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        if target == "old":
+                            old_info = await resp.json(content_type=None)
+                        else:
+                            new_info = await resp.json(content_type=None)
+            except Exception:
+                pass
+
+        # --- Signal: Dormancy ---
+        if old_info and new_info:
+            old_ts_str = old_info.get("Time", "")
+            new_ts_str = new_info.get("Time", "")
+            if old_ts_str and new_ts_str:
+                try:
+                    old_ts = datetime.fromisoformat(old_ts_str.replace("Z", "+00:00"))
+                    new_ts = datetime.fromisoformat(new_ts_str.replace("Z", "+00:00"))
+                    gap_days = (new_ts - old_ts).days
+                    ctx.days_since_last_release = gap_days
+                    if not _is_security_package(name) and gap_days > 365:
+                        ctx.signals.append(VersionSignal(
+                            signal_id="LONG_DORMANCY",
+                            description=f"前回リリースから{gap_days}日ぶりの更新（Go module 休眠復活）",
+                            severity="HIGH",
+                            confidence_boost=0.15,
+                        ))
+                    elif not _is_security_package(name) and gap_days > 180:
+                        ctx.signals.append(VersionSignal(
+                            signal_id="MEDIUM_DORMANCY",
+                            description=f"前回リリースから{gap_days}日ぶりの更新",
+                            severity="MEDIUM",
+                            confidence_boost=0.08,
+                        ))
+                except Exception:
+                    pass
+
+        # --- Signal: VCS origin changed (module hijacking indicator) ---
+        if old_info and new_info:
+            old_origin = (old_info.get("Origin") or {}).get("URL", "")
+            new_origin = (new_info.get("Origin") or {}).get("URL", "")
+            if old_origin and new_origin and old_origin != new_origin:
+                ctx.signals.append(VersionSignal(
+                    signal_id="VCS_ORIGIN_CHANGED",
+                    description=f"Go module のVCSリポジトリURLが変更された: {old_origin} → {new_origin}（モジュールハイジャックの可能性）",
+                    severity="CRITICAL",
+                    confidence_boost=0.40,
+                ))
+
+    except Exception as e:
+        logger.warning(f"Go transition analysis failed for {name}: {e}")
+    finally:
+        if close_session:
+            await session.close()
+
+    return ctx
+
+
+async def analyze_cargo_transition(
+    name: str,
+    old_version: str,
+    new_version: str,
+    session: Optional[aiohttp.ClientSession] = None,
+) -> VersionTransitionContext:
+    """Detect suspicious signals in a Cargo crate version transition."""
+    ctx = VersionTransitionContext(
+        package_name=name,
+        ecosystem="cargo",
+        old_version=old_version,
+        new_version=new_version,
+    )
+    close_session = session is None
+    if session is None:
+        session = aiohttp.ClientSession()
+
+    try:
+        headers = {"User-Agent": CRATESIO_UA}
+
+        # Fetch crate metadata (all versions)
+        crate_url = f"{CRATESIO_URL}/crates/{name}"
+        crate_data: Optional[dict] = None
+        async with session.get(crate_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            if resp.status == 200:
+                crate_data = await resp.json(content_type=None)
+
+        if crate_data:
+            versions = crate_data.get("versions", [])
+            ver_map = {v["num"]: v for v in versions}
+
+            old_ver = ver_map.get(old_version)
+            new_ver = ver_map.get(new_version)
+
+            # --- Signal: Dormancy ---
+            if old_ver and new_ver:
+                old_ts_str = old_ver.get("created_at", "")
+                new_ts_str = new_ver.get("created_at", "")
+                if old_ts_str and new_ts_str:
+                    try:
+                        old_ts = datetime.fromisoformat(old_ts_str.rstrip("Z").split("+")[0])
+                        new_ts = datetime.fromisoformat(new_ts_str.rstrip("Z").split("+")[0])
+                        gap_days = (new_ts - old_ts).days
+                        ctx.days_since_last_release = gap_days
+                        if not _is_security_package(name) and gap_days > 365:
+                            ctx.signals.append(VersionSignal(
+                                signal_id="LONG_DORMANCY",
+                                description=f"前回リリースから{gap_days}日ぶりの更新（Cargo crate 休眠復活）",
+                                severity="HIGH",
+                                confidence_boost=0.15,
+                            ))
+                        elif not _is_security_package(name) and gap_days > 180:
+                            ctx.signals.append(VersionSignal(
+                                signal_id="MEDIUM_DORMANCY",
+                                description=f"前回リリースから{gap_days}日ぶりの更新",
+                                severity="MEDIUM",
+                                confidence_boost=0.08,
+                            ))
+                    except Exception:
+                        pass
+
+            # --- Signal: Yanked version update (publishing yanked → then a new version) ---
+            if old_ver and old_ver.get("yanked", False):
+                ctx.signals.append(VersionSignal(
+                    signal_id="YANKED_PREDECESSOR",
+                    description=f"旧バージョン {old_version} は crates.io でyanked（取り消し）されています",
+                    severity="MEDIUM",
+                    confidence_boost=0.10,
+                ))
+
+        # Note: crates.io does not expose per-version owner history via public API.
+        # Owner change detection would require audit log access (not available).
+
+    except Exception as e:
+        logger.warning(f"Cargo transition analysis failed for {name}: {e}")
+    finally:
+        if close_session:
+            await session.close()
+
+    return ctx
