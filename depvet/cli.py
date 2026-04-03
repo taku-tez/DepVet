@@ -381,7 +381,6 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
     from depvet.alert.webhook import WebhookAlerter
     from depvet.analyzer.triage import TriageAnalyzer
     from depvet.analyzer.deep import DeepAnalyzer
-    from depvet.models.alert import AlertEvent
 
     state = PollingState(config.state.path)
     wl = WatchlistManager()
@@ -415,22 +414,36 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
         click.echo("❌ No ecosystems enabled", err=True)
         sys.exit(1)
 
+    # Resolve watchlist sources from config.watchlist.sources
+    # sources: ["top_n"] | ["sbom"] | ["explicit"] | any combination
+    active_sources = config.watchlist.sources  # e.g. ["top_n", "sbom"]
+
     # Load top-N watchlist (ephemeral — does NOT persist to .depvet_watchlist.yaml)
-    # Per-ecosystem top values from config; CLI --top overrides all ecosystems uniformly
     ephemeral_top: dict[str, set[str]] = {}  # ecosystem -> set of package names
-    for mon in monitors:
-        eco = mon.ecosystem
-        if top > 0:
-            n = top
-        elif eco == "npm":
-            n = config.watchlist.top_n_npm
-        else:
-            n = config.watchlist.top_n_pypi
-        if n > 0:
-            click.echo(f"  Loading top-{n} {eco} packages (ephemeral)...")
-            pkgs = await mon.load_top_n(n)
-            ephemeral_top[eco] = set(pkgs)
-            click.echo(f"  → {len(pkgs)} packages added to ephemeral set")
+    _last_top_n_refresh = 0.0  # timestamp of last top-N refresh
+    refresh_interval = config.watchlist.refresh_interval  # seconds between top-N refreshes
+
+    async def _refresh_top_n() -> None:
+        """Load/reload top-N packages from registries into ephemeral_top."""
+        for mon in monitors:
+            eco = mon.ecosystem
+            if top > 0:
+                n = top
+            elif eco == "npm":
+                n = config.watchlist.top_n_npm
+            else:
+                n = config.watchlist.top_n_pypi
+            if n > 0 and "top_n" in active_sources:
+                click.echo(f"  Loading top-{n} {eco} packages (ephemeral)...")
+                pkgs = await mon.load_top_n(n)
+                ephemeral_top[eco] = set(pkgs)
+                click.echo(f"  → {len(pkgs)} packages added to ephemeral set")
+
+    # Initial load if top_n is an active source or --top was passed
+    if top > 0 or "top_n" in active_sources:
+        await _refresh_top_n()
+        import time as _time
+        _last_top_n_refresh = _time.monotonic()
 
     # Alert router
     router = AlertRouter(min_severity=config.alert.min_severity)
@@ -454,6 +467,14 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
     click.echo(f"   Watchlist: {wl.stats()}")
 
     while True:
+        # Refresh top-N if refresh_interval has elapsed
+        if refresh_interval > 0 and (top > 0 or "top_n" in active_sources):
+            import time as _time
+            if _time.monotonic() - _last_top_n_refresh >= refresh_interval:
+                click.echo("  🔄 Refreshing top-N watchlist...")
+                await _refresh_top_n()
+                _last_top_n_refresh = _time.monotonic()
+
         for mon in monitors:
             eco = mon.ecosystem
             # Merge explicit watchlist with ephemeral top-N (top-N is NOT persisted)
@@ -471,6 +492,29 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
             async def _process_one(release, _eco=eco):
                 click.echo(f"    📦 {release.name} {release.version}")
                 if no_analyze or not release.previous_version:
+                    # Release-only notification: dispatch to alert backends without LLM analysis
+                    from depvet.models.alert import AlertEvent
+                    from depvet.models.verdict import Verdict, VerdictType, Severity, DiffStats
+                    from datetime import datetime, timezone
+                    notify_verdict = Verdict(
+                        verdict=VerdictType.UNKNOWN,
+                        severity=Severity.MEDIUM,  # visible by default min_severity
+                        confidence=0.0,
+                        summary=(
+                            "新規リリースを検出（LLM解析はスキップ）"
+                            if no_analyze
+                            else "新規パッケージの初回リリースを検出（差分比較不可）"
+                        ),
+                        findings=[],
+                        analysis_duration_ms=0,
+                        diff_stats=DiffStats(files_changed=0, lines_added=0, lines_removed=0),
+                        model="none",
+                        analyzed_at=datetime.now(timezone.utc).isoformat(),
+                        chunks_analyzed=0,
+                        tokens_used=0,
+                    )
+                    notify_event = AlertEvent(release=release, verdict=notify_verdict)
+                    await router.dispatch(notify_event)
                     return
                 try:
                     async with _sem:
