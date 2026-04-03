@@ -20,6 +20,10 @@ class WatchlistManager:
         self._explicit = ExplicitSource()
         self._load()
 
+    @property
+    def storage_path(self) -> Path:
+        return self._path
+
     def _load(self) -> None:
         if not self._path.exists():
             return
@@ -42,6 +46,12 @@ class WatchlistManager:
 
     def add(self, name: str, ecosystem: str = "pypi") -> None:
         self._explicit.add(name, ecosystem)
+        self._save()
+
+    def replace(self, entries: list[WatchlistEntry]) -> None:
+        self._explicit = ExplicitSource()
+        for entry in entries:
+            self._explicit.add(entry.name, entry.ecosystem)
         self._save()
 
     def remove(self, name: str, ecosystem: str = "pypi") -> bool:

@@ -9,6 +9,7 @@ import aiohttp
 
 from depvet.models.package import Release
 from depvet.registry.base import BaseRegistryMonitor
+from depvet.registry.versioning import sort_versions
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +127,7 @@ class GoModulesMonitor(BaseRegistryMonitor):
                 return []
             text = await resp.text()
         versions = [v.strip() for v in text.strip().splitlines() if v.strip()]
-        return sorted(versions)
+        return sort_versions(versions, "go")
 
     async def _get_version_info(
         self, module: str, version: str, session: aiohttp.ClientSession

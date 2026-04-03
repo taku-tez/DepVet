@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from depvet.models.alert import AlertEvent
 from depvet.models.verdict import VerdictType

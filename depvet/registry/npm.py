@@ -9,6 +9,7 @@ import aiohttp
 
 from depvet.models.package import Release
 from depvet.registry.base import BaseRegistryMonitor
+from depvet.registry.versioning import sort_versions
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ class NpmMonitor(BaseRegistryMonitor):
             latest = dist_tags.get("latest")
             if not latest:
                 continue
-            versions = sorted(doc.get("versions", {}).keys())
+            versions = sort_versions(list(doc.get("versions", {}).keys()), "npm")
             if latest not in versions:
                 continue
             idx = versions.index(latest)
