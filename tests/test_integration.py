@@ -135,9 +135,9 @@ class TestDownloadIntegration:
 
         with tempfile.TemporaryDirectory() as td:
             path = await download_pypi_package("six", "1.16.0", Path(td))
-        assert path is not None
-        assert path.exists()
-        assert path.stat().st_size > 0
+            assert path is not None
+            assert path.exists()
+            assert path.stat().st_size > 0
 
     @pytest.mark.asyncio
     async def test_download_npm_small_package(self):
@@ -146,9 +146,9 @@ class TestDownloadIntegration:
 
         with tempfile.TemporaryDirectory() as td:
             path = await download_npm_package("is-odd", "3.0.1", Path(td))
-        assert path is not None
-        assert path.exists()
-        assert path.stat().st_size > 0
+            assert path is not None
+            assert path.exists()
+            assert path.stat().st_size > 0
 
     @pytest.mark.asyncio
     async def test_download_go_module(self):
@@ -157,9 +157,9 @@ class TestDownloadIntegration:
 
         with tempfile.TemporaryDirectory() as td:
             path = await download_go_module("github.com/google/uuid", "v1.6.0", Path(td))
-        assert path is not None
-        assert path.exists()
-        assert path.name.endswith(".zip")
+            assert path is not None
+            assert path.exists()
+            assert path.name.endswith(".zip")
 
     @pytest.mark.asyncio
     async def test_download_maven_artifact(self):
@@ -168,9 +168,9 @@ class TestDownloadIntegration:
 
         with tempfile.TemporaryDirectory() as td:
             path = await download_maven_artifact("com.google.code.gson:gson", "2.11.0", Path(td))
-        assert path is not None
-        assert path.exists()
-        assert path.name.endswith(".jar")
+            assert path is not None
+            assert path.exists()
+            assert path.name.endswith(".jar")
 
 
 # ─── Unpack ─────────────────────────────────────────────────────────────────
