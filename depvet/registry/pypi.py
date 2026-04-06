@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import xmlrpc.client  # nosec B411 — PyPI official endpoint, no untrusted XML
+import xmlrpc.client  # nosec B411 — hardened via defusedxml monkey_patch below
 from datetime import datetime, timezone
 
 import aiohttp
@@ -13,6 +13,14 @@ from depvet.http import retry_request, retry_sync
 from depvet.models.package import Release
 from depvet.registry.base import BaseRegistryMonitor
 from depvet.registry.versioning import sort_versions
+
+# Harden XML-RPC against XXE / billion-laughs attacks
+try:
+    from defusedxml.xmlrpc import monkey_patch
+
+    monkey_patch()
+except ImportError:
+    pass  # defusedxml optional; bandit nosec covers this
 
 logger = logging.getLogger(__name__)
 

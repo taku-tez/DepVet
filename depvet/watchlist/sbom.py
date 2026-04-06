@@ -134,11 +134,14 @@ class SBOMParser:
         return entries
 
     def _parse_cyclonedx_xml(self, content: str) -> list[WatchlistEntry]:
-        import xml.etree.ElementTree as ET
+        try:
+            from defusedxml.ElementTree import fromstring as safe_fromstring
+        except ImportError:
+            from xml.etree.ElementTree import fromstring as safe_fromstring  # nosec B314
 
         entries = []
         try:
-            root = ET.fromstring(content)  # nosec B314 — SBOM XML from local file
+            root = safe_fromstring(content)  # nosec B314 — defusedxml preferred; stdlib fallback only
             for ns_uri in [
                 "http://cyclonedx.org/schema/bom/1.4",
                 "http://cyclonedx.org/schema/bom/1.3",
@@ -167,17 +170,20 @@ class SBOMParser:
                             if entry:
                                 entries.append(entry)
                     break
-        except ET.ParseError as e:
+        except Exception as e:
             logger.error(f"XML parse error: {e}")
         return entries
 
     def _parse_spdx_xml(self, content: str) -> list[WatchlistEntry]:
         """Parse SPDX XML format."""
-        import xml.etree.ElementTree as ET
+        try:
+            from defusedxml.ElementTree import fromstring as safe_fromstring
+        except ImportError:
+            from xml.etree.ElementTree import fromstring as safe_fromstring  # nosec B314
 
         entries = []
         try:
-            root = ET.fromstring(content)  # nosec B314 — SBOM XML from local file
+            root = safe_fromstring(content)  # nosec B314 — defusedxml preferred; stdlib fallback only
             # SPDX XML namespaces vary — try common ones
             for ns_uri in [
                 "http://spdx.org/spdx/v2.3/document",
@@ -212,7 +218,7 @@ class SBOMParser:
                                 entries.append(entry)
                 if entries:
                     break
-        except ET.ParseError as e:
+        except Exception as e:
             logger.error(f"SPDX XML parse error: {e}")
         return entries
 

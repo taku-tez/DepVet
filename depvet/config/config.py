@@ -14,7 +14,7 @@ except ImportError:
     except ImportError:
         tomllib = None  # type: ignore
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 from depvet.config.defaults import (
@@ -68,6 +68,23 @@ class WatchlistConfig(BaseSettings):
     top_n_npm: int = DEFAULT_TOP_N_NPM
     refresh_interval: int = DEFAULT_WATCHLIST_REFRESH_INTERVAL
 
+    @field_validator("sbom_format")
+    @classmethod
+    def _validate_sbom_format(cls, v: str) -> str:
+        allowed = {"cyclonedx", "spdx"}
+        if v.lower() not in allowed:
+            raise ValueError(f"sbom_format must be one of {allowed}, got: {v!r}")
+        return v.lower()
+
+    @field_validator("sources")
+    @classmethod
+    def _validate_sources(cls, v: list[str]) -> list[str]:
+        allowed = {"explicit", "top_n", "sbom"}
+        for s in v:
+            if s not in allowed:
+                raise ValueError(f"Unknown watchlist source {s!r}; allowed: {allowed}")
+        return v
+
     model_config = {"env_prefix": "DEPVET_WATCHLIST_", "extra": "ignore"}
 
 
@@ -86,6 +103,21 @@ class AlertConfig(BaseSettings):
     webhook_url: str = ""
     webhook_secret_env: str = "DEPVET_WEBHOOK_SECRET"
     dlq_path: str = ".depvet_dlq.yaml"
+
+    @field_validator("webhook_url")
+    @classmethod
+    def _validate_webhook_url(cls, v: str) -> str:
+        if v and not v.startswith(("http://", "https://")):
+            raise ValueError(f"webhook_url must be an HTTP(S) URL, got: {v!r}")
+        return v
+
+    @field_validator("min_severity")
+    @classmethod
+    def _validate_min_severity(cls, v: str) -> str:
+        allowed = {"NONE", "LOW", "MEDIUM", "HIGH", "CRITICAL"}
+        if v.upper() not in allowed:
+            raise ValueError(f"min_severity must be one of {allowed}, got: {v!r}")
+        return v.upper()
 
     model_config = {"env_prefix": "DEPVET_ALERT_", "extra": "ignore"}
 

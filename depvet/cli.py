@@ -414,7 +414,13 @@ async def _preflight_checks(config, no_analyze: bool, slack: bool, sbom) -> None
         if not url:
             errors.append(f"Slack webhook not set: export {config.alert.slack_webhook_env}")
 
-    # 3. Webhook URL reachability
+    # 3. Webhook secret not set (warning — HMAC signing will be disabled)
+    if config.alert.webhook_url and not os.environ.get(config.alert.webhook_secret_env):
+        warnings.append(
+            f"Webhook secret not set ({config.alert.webhook_secret_env}): alerts will be sent without HMAC signature"
+        )
+
+    # 4. Webhook URL reachability
     if config.alert.webhook_url:
         try:
             async with aiohttp.ClientSession() as session:
@@ -427,11 +433,11 @@ async def _preflight_checks(config, no_analyze: bool, slack: bool, sbom) -> None
         except Exception as e:
             warnings.append(f"Webhook URL unreachable: {config.alert.webhook_url} ({e})")
 
-    # 4. SBOM file existence
+    # 5. SBOM file existence
     if sbom and not Path(sbom).exists():
         errors.append(f"SBOM file not found: {sbom}")
 
-    # 5. State file writability
+    # 6. State file writability
     state_path = Path(config.state.path)
     try:
         state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -910,6 +916,9 @@ def watchlist_import(ctx, sbom_path):
 def watchlist_add(ctx, name, ecosystem):
     """Add a package to the watchlist."""
     if ecosystem == "maven":
+        if ":" not in name:
+            click.echo("❌ Maven artifact must be 'groupId:artifactId' format (e.g. com.google.guava:guava)", err=True)
+            sys.exit(1)
         click.echo(
             "⚠️  Maven is supported for SBOM import and watchlist tracking, "
             "but scan/diff/download is not yet implemented.",
