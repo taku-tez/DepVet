@@ -8,10 +8,15 @@ from typing import Optional
 
 import aiohttp
 
+from depvet.http import retry_request
+
 logger = logging.getLogger(__name__)
 
 PYPI_JSON_API = "https://pypi.org/pypi/{name}/{version}/json"
 NPM_REGISTRY_URL = "https://registry.npmjs.org/{name}/{version}"
+
+_METADATA_TIMEOUT = aiohttp.ClientTimeout(total=30)
+_DOWNLOAD_TIMEOUT = aiohttp.ClientTimeout(total=120)
 
 
 async def download_pypi_package(
@@ -27,7 +32,8 @@ async def download_pypi_package(
 
     try:
         url = PYPI_JSON_API.format(name=name, version=version)
-        async with session.get(url) as resp:
+        resp = await retry_request(session, "GET", url, timeout=_METADATA_TIMEOUT)
+        async with resp:
             if resp.status != 200:
                 logger.warning(f"PyPI JSON API returned {resp.status} for {name}=={version}")
                 return None
@@ -46,7 +52,8 @@ async def download_pypi_package(
         filename = chosen["filename"]
         dest_path = dest_dir / filename
 
-        async with session.get(file_url) as resp:
+        resp = await retry_request(session, "GET", file_url, timeout=_DOWNLOAD_TIMEOUT)
+        async with resp:
             if resp.status != 200:
                 logger.warning(f"Failed to download {file_url}")
                 return None
@@ -78,7 +85,8 @@ async def download_npm_package(
         encoded_name = name.replace("/", "%2F")
         url = NPM_REGISTRY_URL.format(name=encoded_name, version=version)
 
-        async with session.get(url) as resp:
+        resp = await retry_request(session, "GET", url, timeout=_METADATA_TIMEOUT)
+        async with resp:
             if resp.status != 200:
                 logger.warning(f"npm registry returned {resp.status} for {name}@{version}")
                 return None
@@ -92,7 +100,8 @@ async def download_npm_package(
         filename = f"{name.replace('/', '_')}_{version}.tgz"
         dest_path = dest_dir / filename
 
-        async with session.get(tarball_url) as resp:
+        resp = await retry_request(session, "GET", tarball_url, timeout=_DOWNLOAD_TIMEOUT)
+        async with resp:
             if resp.status != 200:
                 logger.warning(f"Failed to download {tarball_url}")
                 return None
@@ -151,7 +160,8 @@ async def download_go_module(
         filename = f"{name.replace('/', '_')}_{version}.zip"
         dest_path = dest_dir / filename
 
-        async with session.get(url) as resp:
+        resp = await retry_request(session, "GET", url, timeout=_DOWNLOAD_TIMEOUT)
+        async with resp:
             if resp.status != 200:
                 logger.warning(f"Go proxy returned {resp.status} for {name}@{version}")
                 return None
@@ -176,16 +186,15 @@ async def download_cargo_crate(
     """Download a Cargo crate from crates.io."""
     close_session = session is None
     if session is None:
-        session = aiohttp.ClientSession(
-            headers={"User-Agent": "depvet/0.1.0 (github.com/taku-tez/DepVet)"}
-        )
+        session = aiohttp.ClientSession(headers={"User-Agent": "depvet/0.1.0 (github.com/taku-tez/DepVet)"})
 
     try:
         url = f"https://static.crates.io/crates/{name}/{name}-{version}.crate"
         filename = f"{name}-{version}.crate"
         dest_path = dest_dir / filename
 
-        async with session.get(url) as resp:
+        resp = await retry_request(session, "GET", url, timeout=_DOWNLOAD_TIMEOUT)
+        async with resp:
             if resp.status != 200:
                 logger.warning(f"crates.io returned {resp.status} for {name}-{version}")
                 return None

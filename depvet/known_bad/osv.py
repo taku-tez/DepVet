@@ -6,6 +6,7 @@ import logging
 
 import aiohttp
 
+from depvet.http import retry_request
 from depvet.known_bad.database import KnownBadEntry
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,9 @@ OSV_ECOSYSTEM_MAP = {
     "cargo": "crates.io",
     "maven": "Maven",
 }
+
+_TIMEOUT = aiohttp.ClientTimeout(total=15)
+_BATCH_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
 
 class OSVChecker:
@@ -51,11 +55,14 @@ class OSVChecker:
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(
+                resp = await retry_request(
+                    session,
+                    "POST",
                     f"{OSV_API}/query",
                     json=payload,
-                    timeout=aiohttp.ClientTimeout(total=15),
-                ) as resp:
+                    timeout=_TIMEOUT,
+                )
+                async with resp:
                     if resp.status != 200:
                         logger.warning(f"OSV API returned {resp.status}")
                         return []
@@ -71,19 +78,22 @@ class OSVChecker:
             severity = self._map_severity(vuln)
             verdict = "MALICIOUS" if osv_id.startswith("MAL-") else "SUSPICIOUS"
 
-            entries.append(KnownBadEntry(
-                name=name,
-                version=version,
-                ecosystem=ecosystem,
-                verdict=verdict,
-                severity=severity,
-                summary=summary,
-                source="osv",
-                reported_at=vuln.get("published", ""),
-                cve=next((a for a in vuln.get("aliases", []) if isinstance(a, str) and a.startswith("CVE-")), None)
-                    if isinstance(vuln.get("aliases", []), list) else None,
-                osv_id=osv_id,
-            ))
+            entries.append(
+                KnownBadEntry(
+                    name=name,
+                    version=version,
+                    ecosystem=ecosystem,
+                    verdict=verdict,
+                    severity=severity,
+                    summary=summary,
+                    source="osv",
+                    reported_at=vuln.get("published", ""),
+                    cve=next((a for a in vuln.get("aliases", []) if isinstance(a, str) and a.startswith("CVE-")), None)
+                    if isinstance(vuln.get("aliases", []), list)
+                    else None,
+                    osv_id=osv_id,
+                )
+            )
 
         return entries
 
@@ -103,10 +113,12 @@ class OSVChecker:
             osv_eco = OSV_ECOSYSTEM_MAP.get(ecosystem)
             if not osv_eco:
                 continue
-            queries.append({
-                "version": version,
-                "package": {"name": name, "ecosystem": osv_eco},
-            })
+            queries.append(
+                {
+                    "version": version,
+                    "package": {"name": name, "ecosystem": osv_eco},
+                }
+            )
             pkg_keys.append((name, version, ecosystem))
 
         if not queries:
@@ -114,11 +126,14 @@ class OSVChecker:
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(
+                resp = await retry_request(
+                    session,
+                    "POST",
                     f"{OSV_API}/querybatch",
                     json={"queries": queries},
-                    timeout=aiohttp.ClientTimeout(total=30),
-                ) as resp:
+                    timeout=_BATCH_TIMEOUT,
+                )
+                async with resp:
                     if resp.status != 200:
                         logger.warning(f"OSV batch API returned {resp.status}")
                         return results
@@ -138,12 +153,20 @@ class OSVChecker:
                 verdict = "MALICIOUS" if osv_id.startswith("MAL-") else "SUSPICIOUS"
                 aliases = vuln.get("aliases", [])
                 cve = next((a for a in aliases if isinstance(a, str) and a.startswith("CVE-")), None)
-                entries.append(KnownBadEntry(
-                    name=name, version=version, ecosystem=ecosystem,
-                    verdict=verdict, severity=severity, summary=summary,
-                    source="osv", reported_at=vuln.get("published", ""),
-                    cve=cve, osv_id=osv_id,
-                ))
+                entries.append(
+                    KnownBadEntry(
+                        name=name,
+                        version=version,
+                        ecosystem=ecosystem,
+                        verdict=verdict,
+                        severity=severity,
+                        summary=summary,
+                        source="osv",
+                        reported_at=vuln.get("published", ""),
+                        cve=cve,
+                        osv_id=osv_id,
+                    )
+                )
             results[key] = entries
 
         return results

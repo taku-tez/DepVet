@@ -8,6 +8,7 @@ from typing import Optional
 
 import aiohttp
 
+from depvet.http import retry_request
 from depvet.models.alert import AlertEvent
 from depvet.models.verdict import Severity, VerdictType
 
@@ -28,9 +29,13 @@ SEVERITY_COLOR = {
     Severity.NONE: "#00CC00",
 }
 
+_TIMEOUT = aiohttp.ClientTimeout(total=10)
+
 
 class SlackAlerter:
     """Sends alerts to Slack via Incoming Webhook."""
+
+    name = "slack"
 
     def __init__(self, webhook_url: Optional[str] = None, webhook_env: str = "DEPVET_SLACK_WEBHOOK"):
         self._webhook_url = webhook_url or os.environ.get(webhook_env, "")
@@ -51,28 +56,33 @@ class SlackAlerter:
             findings_text += f"{i}. *{f.category.value}{cwe}* — {f.description}\n"
 
         payload = {
-            "attachments": [{
-                "color": color,
-                "title": f"{emoji} {v.verdict.value}: {r.name} {r.version} ({r.ecosystem.upper()})",
-                "title_link": r.url,
-                "fields": [
-                    {"title": "Severity", "value": v.severity.value, "short": True},
-                    {"title": "Confidence", "value": f"{v.confidence:.0%}", "short": True},
-                    {"title": "Previous", "value": r.previous_version or "N/A", "short": True},
-                    {"title": "Findings", "value": str(len(v.findings)), "short": True},
-                ],
-                "text": f"*Summary:* {v.summary}\n\n*Findings:*\n{findings_text}" if v.findings else v.summary,
-                "footer": "DepVet",
-            }]
+            "attachments": [
+                {
+                    "color": color,
+                    "title": f"{emoji} {v.verdict.value}: {r.name} {r.version} ({r.ecosystem.upper()})",
+                    "title_link": r.url,
+                    "fields": [
+                        {"title": "Severity", "value": v.severity.value, "short": True},
+                        {"title": "Confidence", "value": f"{v.confidence:.0%}", "short": True},
+                        {"title": "Previous", "value": r.previous_version or "N/A", "short": True},
+                        {"title": "Findings", "value": str(len(v.findings)), "short": True},
+                    ],
+                    "text": f"*Summary:* {v.summary}\n\n*Findings:*\n{findings_text}" if v.findings else v.summary,
+                    "footer": "DepVet",
+                }
+            ]
         }
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self._webhook_url, json=payload,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.status != 200:
-                        logger.error(f"Slack webhook failed: {resp.status}")
-        except Exception as e:
-            logger.error(f"Failed to send Slack alert: {e}")
+        from depvet.alert.router import AlertDeliveryError
+
+        async with aiohttp.ClientSession() as session:
+            resp = await retry_request(
+                session,
+                "POST",
+                self._webhook_url,
+                json=payload,
+                timeout=_TIMEOUT,
+            )
+            async with resp:
+                if resp.status != 200:
+                    raise AlertDeliveryError(f"Slack webhook returned {resp.status}")

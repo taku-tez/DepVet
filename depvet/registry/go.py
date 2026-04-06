@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 import aiohttp
 
+from depvet.http import retry_request
 from depvet.models.package import Release
 from depvet.registry.base import BaseRegistryMonitor
 from depvet.registry.versioning import sort_versions
@@ -20,6 +21,8 @@ SUMDB_URL = "https://sum.golang.org"
 # Note: Go doesn't have a simple "changelog" API like PyPI/npm.
 # We poll the module proxy for specific modules in the watchlist.
 # State: {"checked_at": ISO8601 per module}
+
+_TIMEOUT = aiohttp.ClientTimeout(total=10)
 
 
 class GoModulesMonitor(BaseRegistryMonitor):
@@ -69,14 +72,16 @@ class GoModulesMonitor(BaseRegistryMonitor):
                         info = await self._get_version_info(module, latest, session)
                         published_at = info.get("Time", datetime.now(timezone.utc).isoformat())
 
-                        releases.append(Release(
-                            name=module,
-                            version=latest,
-                            ecosystem="go",
-                            previous_version=prev_ver,
-                            published_at=published_at,
-                            url=f"https://pkg.go.dev/{module}@{latest}",
-                        ))
+                        releases.append(
+                            Release(
+                                name=module,
+                                version=latest,
+                                ecosystem="go",
+                                previous_version=prev_ver,
+                                published_at=published_at,
+                                url=f"https://pkg.go.dev/{module}@{latest}",
+                            )
+                        )
                         new_known[module] = latest
 
                 except Exception as e:
@@ -113,13 +118,12 @@ class GoModulesMonitor(BaseRegistryMonitor):
         ]
         return popular[:n]
 
-    async def _list_versions(
-        self, module: str, session: aiohttp.ClientSession
-    ) -> list[str]:
+    async def _list_versions(self, module: str, session: aiohttp.ClientSession) -> list[str]:
         """List available versions for a Go module."""
         encoded = module.replace("/", "%2F")
         url = f"{GOPROXY_URL}/{encoded}/@v/list"
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+        resp = await retry_request(session, "GET", url, timeout=_TIMEOUT)
+        async with resp:
             if resp.status == 410:
                 return []  # Module not found or retracted
             if resp.status != 200:
@@ -129,14 +133,13 @@ class GoModulesMonitor(BaseRegistryMonitor):
         versions = [v.strip() for v in text.strip().splitlines() if v.strip()]
         return sort_versions(versions, "go")
 
-    async def _get_version_info(
-        self, module: str, version: str, session: aiohttp.ClientSession
-    ) -> dict:
+    async def _get_version_info(self, module: str, version: str, session: aiohttp.ClientSession) -> dict:
         """Get version info (timestamp etc.) from Go proxy."""
         encoded_mod = module.replace("/", "%2F")
         url = f"{GOPROXY_URL}/{encoded_mod}/@v/{version}.info"
         try:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            resp = await retry_request(session, "GET", url, timeout=_TIMEOUT)
+            async with resp:
                 if resp.status == 200:
                     return await resp.json(content_type=None)
         except Exception:

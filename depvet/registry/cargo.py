@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 import aiohttp
 
+from depvet.http import retry_request
 from depvet.models.package import Release
 from depvet.registry.base import BaseRegistryMonitor
 
@@ -17,6 +18,9 @@ CRATES_IO_ACTIVITY = "https://crates.io/api/v1/summary"
 
 # User-Agent required by crates.io policy
 DEFAULT_UA = "depvet/0.1.0 (github.com/taku-tez/DepVet)"
+
+_TIMEOUT = aiohttp.ClientTimeout(total=10)
+_TOP_N_TIMEOUT = aiohttp.ClientTimeout(total=15)
 
 
 class CargoMonitor(BaseRegistryMonitor):
@@ -70,14 +74,16 @@ class CargoMonitor(BaseRegistryMonitor):
                         # Find previous version (second in list, or prev_known)
                         prev_version = versions[1]["num"] if len(versions) > 1 else prev_known
 
-                        releases.append(Release(
-                            name=crate,
-                            version=latest["num"],
-                            ecosystem="cargo",
-                            previous_version=prev_version,
-                            published_at=latest.get("created_at", datetime.now(timezone.utc).isoformat()),
-                            url=f"https://crates.io/crates/{crate}/{latest['num']}",
-                        ))
+                        releases.append(
+                            Release(
+                                name=crate,
+                                version=latest["num"],
+                                ecosystem="cargo",
+                                previous_version=prev_version,
+                                published_at=latest.get("created_at", datetime.now(timezone.utc).isoformat()),
+                                url=f"https://crates.io/crates/{crate}/{latest['num']}",
+                            )
+                        )
                         new_known[crate] = latest["num"]
 
                 except Exception as e:
@@ -90,14 +96,17 @@ class CargoMonitor(BaseRegistryMonitor):
         try:
             async with aiohttp.ClientSession(headers=self._headers()) as session:
                 page = 1
-                results = []
+                results: list[str] = []
                 while len(results) < n:
                     params = {"sort": "downloads", "per_page": 100, "page": page}
-                    async with session.get(
+                    resp = await retry_request(
+                        session,
+                        "GET",
                         f"{CRATES_IO_API}/crates",
                         params=params,
-                        timeout=aiohttp.ClientTimeout(total=15),
-                    ) as resp:
+                        timeout=_TOP_N_TIMEOUT,
+                    )
+                    async with resp:
                         if resp.status != 200:
                             break
                         data = await resp.json()
@@ -113,12 +122,11 @@ class CargoMonitor(BaseRegistryMonitor):
             logger.error(f"Failed to load top Cargo crates: {e}")
             return []
 
-    async def _get_versions(
-        self, crate: str, session: aiohttp.ClientSession
-    ) -> list[dict]:
+    async def _get_versions(self, crate: str, session: aiohttp.ClientSession) -> list[dict]:
         """Get version list for a crate (newest first, non-yanked)."""
         url = f"{CRATES_IO_API}/crates/{crate}/versions"
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+        resp = await retry_request(session, "GET", url, timeout=_TIMEOUT)
+        async with resp:
             if resp.status == 404:
                 logger.debug(f"Crate not found: {crate}")
                 return []

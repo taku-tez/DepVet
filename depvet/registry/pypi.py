@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import xmlrpc.client
+import xmlrpc.client  # nosec B411 — PyPI official endpoint, no untrusted XML
 from datetime import datetime, timezone
 
 import aiohttp
 
+from depvet.http import retry_request, retry_sync
 from depvet.models.package import Release
 from depvet.registry.base import BaseRegistryMonitor
 from depvet.registry.versioning import sort_versions
@@ -17,9 +18,9 @@ logger = logging.getLogger(__name__)
 
 XMLRPC_ENDPOINT = "https://pypi.org/pypi"
 JSON_API = "https://pypi.org/pypi/{name}/{version}/json"
-TOP_PACKAGES_URL = (
-    "https://hugovk.github.io/top-pypi-packages/top-pypi-packages-30-days.min.json"
-)
+TOP_PACKAGES_URL = "https://hugovk.github.io/top-pypi-packages/top-pypi-packages-30-days.min.json"
+
+_TIMEOUT = aiohttp.ClientTimeout(total=15)
 
 
 class PyPIMonitor(BaseRegistryMonitor):
@@ -48,25 +49,43 @@ class PyPIMonitor(BaseRegistryMonitor):
             seen.add(key)
             prev = await self._get_previous_version(name, version)
             published_at = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
-            releases.append(Release(
-                name=name, version=version, ecosystem="pypi",
-                previous_version=prev, published_at=published_at,
-                url=f"https://pypi.org/project/{name}/{version}/",
-            ))
+            releases.append(
+                Release(
+                    name=name,
+                    version=version,
+                    ecosystem="pypi",
+                    previous_version=prev,
+                    published_at=published_at,
+                    url=f"https://pypi.org/project/{name}/{version}/",
+                )
+            )
         return releases, {"serial": new_serial}
 
     async def load_top_n(self, n):
-        async with aiohttp.ClientSession() as session:
-            async with session.get(TOP_PACKAGES_URL) as resp:
-                data = await resp.json(content_type=None)
-        rows = data.get("rows", [])
-        return [r["project"] for r in rows[:n]]
+        try:
+            async with aiohttp.ClientSession() as session:
+                resp = await retry_request(
+                    session,
+                    "GET",
+                    TOP_PACKAGES_URL,
+                    timeout=_TIMEOUT,
+                )
+                async with resp:
+                    data = await resp.json(content_type=None)
+            rows = data.get("rows", [])
+            return [r["project"] for r in rows[:n]]
+        except Exception as e:
+            logger.error(f"Failed to load top PyPI packages: {e}")
+            return []
 
     async def _get_current_serial(self):
         loop = asyncio.get_event_loop()
         client = xmlrpc.client.ServerProxy(XMLRPC_ENDPOINT)
         try:
-            serial = await loop.run_in_executor(None, client.changelog_last_serial)
+            serial = await loop.run_in_executor(
+                None,
+                lambda: retry_sync(client.changelog_last_serial),
+            )
             return int(serial)
         except Exception as e:
             logger.warning(f"Failed to get current serial: {e}")
@@ -77,7 +96,9 @@ class PyPIMonitor(BaseRegistryMonitor):
         client = xmlrpc.client.ServerProxy(XMLRPC_ENDPOINT)
         try:
             events = await loop.run_in_executor(
-                None, lambda: client.changelog_since_serial(serial))
+                None,
+                lambda: retry_sync(client.changelog_since_serial, serial),
+            )
             return events or []
         except Exception as e:
             logger.error(f"PyPI changelog_since_serial failed: {e}")
@@ -87,7 +108,8 @@ class PyPIMonitor(BaseRegistryMonitor):
         try:
             url = f"https://pypi.org/pypi/{name}/json"
             async with aiohttp.ClientSession() as session:
-                async with session.get(url) as resp:
+                resp = await retry_request(session, "GET", url, timeout=_TIMEOUT)
+                async with resp:
                     if resp.status != 200:
                         return None
                     data = await resp.json()

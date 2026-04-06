@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 import aiohttp
 
+from depvet.http import retry_request
 from depvet.models.package import Release
 from depvet.registry.base import BaseRegistryMonitor
 from depvet.registry.versioning import sort_versions
@@ -17,6 +18,9 @@ CHANGES_URL = "https://replicate.npmjs.com/_changes"
 REGISTRY_URL = "https://registry.npmjs.org/{name}"
 TOP_PACKAGES_URL = "https://registry.npmjs.org/-/v1/search?text=&size={n}&from=0"
 MAX_SEQ_GAP = 10_000
+
+_CHANGES_TIMEOUT = aiohttp.ClientTimeout(total=30)
+_TIMEOUT = aiohttp.ClientTimeout(total=15)
 
 
 class NpmMonitor(BaseRegistryMonitor):
@@ -33,8 +37,14 @@ class NpmMonitor(BaseRegistryMonitor):
         new_seq = seq
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(CHANGES_URL, params=params,
-                                       timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                resp = await retry_request(
+                    session,
+                    "GET",
+                    CHANGES_URL,
+                    params=params,
+                    timeout=_CHANGES_TIMEOUT,
+                )
+                async with resp:
                     if resp.status != 200:
                         logger.warning(f"npm _changes returned {resp.status}")
                         return [], since_state
@@ -65,18 +75,24 @@ class NpmMonitor(BaseRegistryMonitor):
                 published_at = datetime.fromisoformat(published_raw.replace("Z", "+00:00")).isoformat()
             except Exception:
                 published_at = datetime.now(timezone.utc).isoformat()
-            releases.append(Release(
-                name=name, version=latest, ecosystem="npm",
-                previous_version=prev, published_at=published_at,
-                url=f"https://www.npmjs.com/package/{name}/v/{latest}",
-            ))
+            releases.append(
+                Release(
+                    name=name,
+                    version=latest,
+                    ecosystem="npm",
+                    previous_version=prev,
+                    published_at=published_at,
+                    url=f"https://www.npmjs.com/package/{name}/v/{latest}",
+                )
+            )
         return releases, {"seq": new_seq, "epoch": 0}
 
     async def load_top_n(self, n):
         url = TOP_PACKAGES_URL.format(n=min(n, 250))
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url) as resp:
+                resp = await retry_request(session, "GET", url, timeout=_TIMEOUT)
+                async with resp:
                     if resp.status != 200:
                         return []
                     data = await resp.json(content_type=None)
