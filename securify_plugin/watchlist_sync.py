@@ -67,11 +67,16 @@ class WatchlistSyncJob:
             storage_path = self._tenant_storage_dir / f"{self._tenant_filename(tenant_id)}.yaml"
             manager = WatchlistManager(storage_path=str(storage_path))
             self._tenant_watchlists[tenant_id] = manager
+            # Restore in-memory package set from persisted watchlist
+            if tenant_id not in self._tenant_packages:
+                pkg_set: set[tuple[str, str, str]] = set()
+                for entry in manager.all_entries():
+                    pkg_set.add((entry.name, entry.ecosystem, entry.current_version))
+                if pkg_set:
+                    self._tenant_packages[tenant_id] = pkg_set
         return manager
 
-    async def on_sbom_scan_complete(
-        self, tenant_id: str, sbom_path: str
-    ) -> int:
+    async def on_sbom_scan_complete(self, tenant_id: str, sbom_path: str) -> int:
         """
         Called when Securify completes a SBOM scan for a tenant.
         Returns number of packages added to watchlist.
@@ -88,16 +93,26 @@ class WatchlistSyncJob:
         logger.info(f"[WatchlistSync] Tenant {tenant_id}: {len(entries)} packages synced from SBOM")
         return len(entries)
 
-    async def find_tenants_using(
-        self, package_name: str, ecosystem: str, version: str
-    ) -> list[dict]:
+    def _ensure_all_tenants_loaded(self) -> None:
+        """Restore tenant data from persisted YAML files on disk."""
+        if not self._tenant_storage_dir.exists():
+            return
+        for yaml_file in self._tenant_storage_dir.glob("*.yaml"):
+            tenant_id = yaml_file.stem
+            if tenant_id not in self._tenant_watchlists:
+                self._manager_for_tenant(tenant_id)
+
+    async def find_tenants_using(self, package_name: str, ecosystem: str, version: str) -> list[dict]:
         """
         Find tenants whose SBOM includes the specified package.
         Returns list of tenant dicts with at least {"id": str}.
         """
+        # Ensure all persisted tenant watchlists are loaded into memory
+        self._ensure_all_tenants_loaded()
+
         affected = []
         for tenant_id, pkgs in self._tenant_packages.items():
-            for (pkg, eco, ver) in pkgs:
+            for pkg, eco, ver in pkgs:
                 if pkg == package_name and eco == ecosystem:
                     # Version match: exact or wildcard
                     if ver == version or ver == "" or not ver:

@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 CHANGES_URL = "https://replicate.npmjs.com/_changes"
 REGISTRY_URL = "https://registry.npmjs.org/{name}"
-TOP_PACKAGES_URL = "https://registry.npmjs.org/-/v1/search?text=&size={n}&from=0"
 MAX_SEQ_GAP = 10_000
 
 _CHANGES_TIMEOUT = aiohttp.ClientTimeout(total=30)
@@ -67,6 +66,12 @@ class NpmMonitor(BaseRegistryMonitor):
         results = data.get("results", [])
         if results:
             new_seq = str(results[-1].get("seq", seq))
+
+        # Track per-package last-seen version to avoid false positives
+        # from doc updates that don't change the latest version.
+        known_versions: dict[str, str] = since_state.get("versions", {})
+        new_known = dict(known_versions)
+
         for row in results:
             doc = row.get("doc", {})
             name = doc.get("name", "")
@@ -76,11 +81,22 @@ class NpmMonitor(BaseRegistryMonitor):
             latest = dist_tags.get("latest")
             if not latest:
                 continue
+
+            # Skip if we already saw this version (doc update, not new publish)
+            if known_versions.get(name) == latest:
+                continue
+            new_known[name] = latest
+
             versions = sort_versions(list(doc.get("versions", {}).keys()), "npm")
             if latest not in versions:
                 continue
             idx = versions.index(latest)
             prev = versions[idx - 1] if idx > 0 else None
+
+            # First time seeing this package — record but don't alert
+            if name not in known_versions:
+                continue
+
             time_data = doc.get("time", {})
             published_raw = time_data.get(latest, "")
             try:
@@ -97,20 +113,35 @@ class NpmMonitor(BaseRegistryMonitor):
                     url=f"https://www.npmjs.com/package/{name}/v/{latest}",
                 )
             )
-        return releases, {"seq": new_seq, "epoch": 0}
+        return releases, {"seq": new_seq, "epoch": 0, "versions": new_known}
 
     async def load_top_n(self, n: int, session: Optional[aiohttp.ClientSession] = None):
-        url = TOP_PACKAGES_URL.format(n=min(n, 250))
+        """Load top N npm packages via search API with pagination (max 250/page)."""
         close_session = session is None
         if session is None:
             session = aiohttp.ClientSession()
         try:
-            resp = await retry_request(session, "GET", url, timeout=_TIMEOUT)
-            async with resp:
-                if resp.status != 200:
-                    return []
-                data = await resp.json(content_type=None)
-            return [obj["package"]["name"] for obj in data.get("objects", [])]
+            results: list[str] = []
+            offset = 0
+            page_size = min(n, 250)
+            while len(results) < n:
+                url = f"https://registry.npmjs.org/-/v1/search?text=&size={page_size}&from={offset}"
+                resp = await retry_request(session, "GET", url, timeout=_TIMEOUT)
+                async with resp:
+                    if resp.status != 200:
+                        break
+                    data = await resp.json(content_type=None)
+                objects = data.get("objects", [])
+                if not objects:
+                    break
+                for obj in objects:
+                    name = obj.get("package", {}).get("name")
+                    if name and name not in results:
+                        results.append(name)
+                offset += len(objects)
+                if len(objects) < page_size:
+                    break
+            return results[:n]
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.error(f"Failed to load top npm packages: {e}")
             return []
