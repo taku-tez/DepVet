@@ -220,6 +220,123 @@ class TestUnknownLockfile:
         assert entries == []
 
 
+class TestCorruptFiles:
+    def test_corrupt_package_lock(self, tmp_path):
+        path = tmp_path / "package-lock.json"
+        path.write_text("{{{not json")
+        entries = parse_lockfile(str(path))
+        assert entries == []
+
+    def test_corrupt_pipfile_lock(self, tmp_path):
+        path = tmp_path / "Pipfile.lock"
+        path.write_text("invalid json content!!!")
+        entries = parse_lockfile(str(path))
+        assert entries == []
+
+    def test_missing_yarn_lock(self, tmp_path):
+        path = tmp_path / "yarn.lock"
+        # Write empty content
+        path.write_text("")
+        entries = parse_lockfile(str(path))
+        assert entries == []
+
+    def test_missing_go_sum(self, tmp_path):
+        path = tmp_path / "go.sum"
+        path.write_text("")
+        entries = parse_lockfile(str(path))
+        assert entries == []
+
+
+class TestPackageLockEdgeCases:
+    def test_v3_with_name_field(self, tmp_path):
+        """When package has explicit 'name' field, it should be used."""
+        data = {
+            "lockfileVersion": 3,
+            "packages": {
+                "": {},
+                "node_modules/@scope/pkg": {
+                    "name": "@scope/pkg",
+                    "version": "1.0.0",
+                },
+            },
+        }
+        path = tmp_path / "package-lock.json"
+        path.write_text(json.dumps(data))
+        entries = parse_lockfile(str(path))
+        assert len(entries) == 1
+        assert entries[0].name == "@scope/pkg"
+
+    def test_v1_with_non_dict_version(self, tmp_path):
+        """Gracefully handle non-dict dependency values."""
+        data = {
+            "lockfileVersion": 1,
+            "dependencies": {
+                "normal": {"version": "1.0.0"},
+                "weird": "1.0.0",  # string instead of dict
+            },
+        }
+        path = tmp_path / "package-lock.json"
+        path.write_text(json.dumps(data))
+        entries = parse_lockfile(str(path))
+        names = {e.name for e in entries}
+        assert "normal" in names
+        assert "weird" in names
+
+    def test_deduplicates_nested(self, tmp_path):
+        """Same package at different nesting levels should be deduplicated."""
+        data = {
+            "lockfileVersion": 3,
+            "packages": {
+                "": {},
+                "node_modules/lodash": {"version": "4.17.21"},
+                "node_modules/express/node_modules/lodash": {"version": "4.17.20"},
+            },
+        }
+        path = tmp_path / "package-lock.json"
+        path.write_text(json.dumps(data))
+        entries = parse_lockfile(str(path))
+        lodash_entries = [e for e in entries if e.name == "lodash"]
+        assert len(lodash_entries) == 1
+
+
+class TestPoetryLockEdgeCases:
+    def test_single_package_no_trailing_section(self, tmp_path):
+        """Single package without a subsequent [[package]] marker."""
+        content = '[[package]]\nname = "solo"\nversion = "1.0.0"\n'
+        path = tmp_path / "poetry.lock"
+        path.write_text(content)
+        entries = parse_lockfile(str(path))
+        assert len(entries) == 1
+        assert entries[0].name == "solo"
+
+    def test_deduplicates(self, tmp_path):
+        content = '[[package]]\nname = "dup"\nversion = "1.0"\n[[package]]\nname = "dup"\nversion = "2.0"\n'
+        path = tmp_path / "poetry.lock"
+        path.write_text(content)
+        entries = parse_lockfile(str(path))
+        assert len(entries) == 1
+
+
+class TestCargoLockEdgeCases:
+    def test_deduplicates(self, tmp_path):
+        content = '[[package]]\nname = "serde"\nversion = "1.0.203"\n[[package]]\nname = "serde"\nversion = "1.0.204"\n'
+        path = tmp_path / "Cargo.lock"
+        path.write_text(content)
+        entries = parse_lockfile(str(path))
+        serde = [e for e in entries if e.name == "serde"]
+        assert len(serde) == 1
+
+
+class TestGoSumEdgeCases:
+    def test_ignores_malformed_lines(self, tmp_path):
+        content = "this is not a valid go.sum line\ngithub.com/pkg/errors v0.9.1 h1:abc==\n"
+        path = tmp_path / "go.sum"
+        path.write_text(content)
+        entries = parse_lockfile(str(path))
+        assert len(entries) == 1
+        assert entries[0].name == "github.com/pkg/errors"
+
+
 class TestManagerImportLockfile:
     def test_import_adds_to_watchlist(self, tmp_path):
         from depvet.watchlist.manager import WatchlistManager

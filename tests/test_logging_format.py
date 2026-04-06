@@ -94,3 +94,112 @@ class TestSetupLogging:
         setup_logging(verbose=False, log_format="text")
         root = logging.getLogger()
         assert len(root.handlers) == 1
+
+    def test_non_verbose_sets_warning(self):
+        setup_logging(verbose=False, log_format="text")
+        root = logging.getLogger()
+        assert root.level == logging.WARNING
+
+
+class TestJsonFormatterStructuredFields:
+    """Test that all structured fields are captured when present."""
+
+    def _make_record(self, msg: str = "test", **extra) -> logging.LogRecord:
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="test.py",
+            lineno=1,
+            msg=msg,
+            args=(),
+            exc_info=None,
+        )
+        for k, v in extra.items():
+            setattr(record, k, v)
+        return record
+
+    def test_ecosystem_field(self):
+        fmt = JsonFormatter()
+        record = self._make_record(ecosystem="npm")
+        data = json.loads(fmt.format(record))
+        assert data["ecosystem"] == "npm"
+
+    def test_package_field(self):
+        fmt = JsonFormatter()
+        record = self._make_record(package="lodash")
+        data = json.loads(fmt.format(record))
+        assert data["package"] == "lodash"
+
+    def test_version_field(self):
+        fmt = JsonFormatter()
+        record = self._make_record(version="4.17.21")
+        data = json.loads(fmt.format(record))
+        assert data["version"] == "4.17.21"
+
+    def test_alerter_field(self):
+        fmt = JsonFormatter()
+        record = self._make_record(alerter="slack")
+        data = json.loads(fmt.format(record))
+        assert data["alerter"] == "slack"
+
+    def test_dlq_id_field(self):
+        fmt = JsonFormatter()
+        record = self._make_record(dlq_id="abc-123")
+        data = json.loads(fmt.format(record))
+        assert data["dlq_id"] == "abc-123"
+
+    def test_cycle_field(self):
+        fmt = JsonFormatter()
+        record = self._make_record(cycle=5)
+        data = json.loads(fmt.format(record))
+        assert data["cycle"] == 5
+
+    def test_releases_count_field(self):
+        fmt = JsonFormatter()
+        record = self._make_record(releases_count=10)
+        data = json.loads(fmt.format(record))
+        assert data["releases_count"] == 10
+
+    def test_duration_ms_field(self):
+        fmt = JsonFormatter()
+        record = self._make_record(duration_ms=1234)
+        data = json.loads(fmt.format(record))
+        assert data["duration_ms"] == 1234
+
+    def test_signal_field(self):
+        fmt = JsonFormatter()
+        record = self._make_record(signal="maintainer_change")
+        data = json.loads(fmt.format(record))
+        assert data["signal"] == "maintainer_change"
+
+    def test_multiple_structured_fields(self):
+        fmt = JsonFormatter()
+        record = self._make_record(
+            ecosystem="pypi",
+            package="requests",
+            version="2.32.0",
+            duration_ms=500,
+        )
+        data = json.loads(fmt.format(record))
+        assert data["ecosystem"] == "pypi"
+        assert data["package"] == "requests"
+        assert data["version"] == "2.32.0"
+        assert data["duration_ms"] == 500
+
+    def test_output_is_single_line(self):
+        fmt = JsonFormatter()
+        record = self._make_record("multi\nline\nmessage")
+        output = fmt.format(record)
+        assert "\n" not in output  # JSON dumps should produce single line
+
+    def test_unicode_preserved(self):
+        fmt = JsonFormatter()
+        record = self._make_record("悪意のあるパッケージ")
+        output = fmt.format(record)
+        assert "悪意のあるパッケージ" in output
+
+    def test_timestamp_is_utc_iso(self):
+        fmt = JsonFormatter()
+        record = self._make_record("test")
+        data = json.loads(fmt.format(record))
+        assert "+00:00" in data["timestamp"]

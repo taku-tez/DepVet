@@ -128,3 +128,112 @@ class TestCheckHealth:
         with pytest.raises(SystemExit) as exc_info:
             check_health(str(tmp_path / "missing.json"))
         assert exc_info.value.code == 0
+
+
+class TestMetricsAlertTracking:
+    def test_record_alert_sent(self):
+        m = MonitorMetrics()
+        m.record_alert_sent()
+        m.record_alert_sent()
+        assert m.alerts_sent == 2
+
+    def test_record_alert_failed(self):
+        m = MonitorMetrics()
+        m.record_alert_failed()
+        assert m.alerts_failed == 1
+
+    def test_alert_counters_independent(self):
+        m = MonitorMetrics()
+        m.record_alert_sent()
+        m.record_alert_failed()
+        m.record_alert_sent()
+        assert m.alerts_sent == 2
+        assert m.alerts_failed == 1
+
+
+class TestMetricsToDict:
+    def test_all_keys_present(self):
+        m = MonitorMetrics()
+        m.record_release("pypi")
+        m.record_analysis(tokens=100, duration_ms=500)
+        m.record_alert_sent()
+        m.cycles_completed = 3
+        d = m.to_dict()
+        expected_keys = {
+            "uptime_seconds",
+            "cycles_completed",
+            "releases_processed",
+            "releases_skipped",
+            "releases_by_ecosystem",
+            "alerts_sent",
+            "alerts_failed",
+            "analyses_completed",
+            "total_tokens_used",
+            "total_analysis_duration_ms",
+            "avg_analysis_ms",
+            "avg_tokens_per_analysis",
+        }
+        assert expected_keys == set(d.keys())
+
+    def test_avg_rounded(self):
+        m = MonitorMetrics()
+        m.record_analysis(tokens=100, duration_ms=333)
+        m.record_analysis(tokens=200, duration_ms=667)
+        d = m.to_dict()
+        # avg should be 500ms and 150 tokens
+        assert d["avg_analysis_ms"] == 500.0
+        assert d["avg_tokens_per_analysis"] == 150.0
+
+    def test_zero_analyses_avg(self):
+        m = MonitorMetrics()
+        d = m.to_dict()
+        assert d["avg_analysis_ms"] == 0.0
+        assert d["avg_tokens_per_analysis"] == 0.0
+
+
+class TestMetricsLogSummary:
+    def test_log_summary_does_not_crash(self, caplog):
+        m = MonitorMetrics()
+        m.record_release("npm")
+        m.record_analysis(tokens=50, duration_ms=200)
+        m.record_alert_sent()
+        with caplog.at_level("INFO"):
+            m.log_summary()
+        assert any("Monitor metrics" in r.message for r in caplog.records)
+
+
+class TestMetricsMultipleEcosystems:
+    def test_multiple_ecosystems(self):
+        m = MonitorMetrics()
+        m.record_release("pypi")
+        m.record_release("npm")
+        m.record_release("npm")
+        m.record_release("go")
+        m.record_release("cargo")
+        m.record_release("cargo")
+        m.record_release("cargo")
+        assert m.releases_processed == 7
+        assert m.releases_by_ecosystem == {
+            "pypi": 1,
+            "npm": 2,
+            "go": 1,
+            "cargo": 3,
+        }
+
+
+class TestHealthWriteNoMetrics:
+    def test_write_without_metrics(self, tmp_path):
+        path = str(tmp_path / "health.json")
+        write_health(path)
+        data = read_health(path)
+        assert data is not None
+        assert data["status"] == "ok"
+        assert "pid" in data
+        # Should NOT have metrics keys when metrics=None
+        assert "releases_processed" not in data
+
+    def test_write_to_nonexistent_parent_dir(self, tmp_path):
+        """Writing to a path with missing parent should log warning, not crash."""
+        path = str(tmp_path / "deep" / "nested" / "health.json")
+        # Should not raise — just logs a warning
+        write_health(path)
