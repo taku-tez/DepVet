@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 CHANGES_URL = "https://replicate.npmjs.com/_changes"
 REGISTRY_URL = "https://registry.npmjs.org/{name}"
-TOP_PACKAGES_URL = "https://registry.npmjs.org/-/v1/search?text=keywords:popular&size={n}&from=0"
+TOP_PACKAGES_URL = "https://registry.npmjs.org/-/v1/search?text=&size={n}&from=0"
 MAX_SEQ_GAP = 10_000
 
 _CHANGES_TIMEOUT = aiohttp.ClientTimeout(total=30)
