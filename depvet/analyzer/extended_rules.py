@@ -138,4 +138,89 @@ EXTENDED_PATTERNS = [
         "description": "動的ライブラリロード（ctypes/dlopen/LoadLibrary）が追加された",
         "cwe": "CWE-829",
     },
+    # ── CommonJS / npm obfuscation patterns ────────────────────────────────
+    # String concatenation to build require() path (e.g. require('ch'+'ild_pr'+'ocess'))
+    {
+        "id": "CJS_REQUIRE_CONCAT",
+        "pattern": re.compile(
+            r"""require\s*\(\s*['"][^'"]*['"]\s*\+\s*['"]""",
+            re.IGNORECASE,
+        ),
+        "category": FindingCategory.OBFUSCATION,
+        "severity": Severity.HIGH,
+        "description": "require()パスが文字列連結で構築されている（モジュール名難読化）",
+        "cwe": "CWE-506",
+    },
+    # Array/charCode decoding to build strings (common in npm malware)
+    {
+        "id": "CJS_CHARCODE_BUILD",
+        "pattern": re.compile(
+            r"String\.fromCharCode\s*\(\s*(?:\d+\s*,?\s*){3,}",
+            re.IGNORECASE,
+        ),
+        "category": FindingCategory.OBFUSCATION,
+        "severity": Severity.HIGH,
+        "description": "String.fromCharCode()による文字列構築が検出された（難読化手法）",
+        "cwe": "CWE-506",
+    },
+    # Hex/unicode escape sequences in require or function calls
+    {
+        "id": "CJS_HEX_ESCAPE",
+        "pattern": re.compile(
+            r"""(?:require|eval|Function)\s*\(\s*['"](?:\\x[0-9a-f]{2}|\\u[0-9a-f]{4}){3,}""",
+            re.IGNORECASE,
+        ),
+        "category": FindingCategory.OBFUSCATION,
+        "severity": Severity.CRITICAL,
+        "description": "hex/unicodeエスケープシーケンスで難読化されたrequire/eval呼び出しが検出された",
+        "cwe": "CWE-506",
+    },
+    # new Function() constructor (eval equivalent in JS)
+    {
+        "id": "CJS_NEW_FUNCTION",
+        "pattern": re.compile(
+            r"""new\s+Function\s*\(\s*['"`]""",
+            re.IGNORECASE,
+        ),
+        "category": FindingCategory.EXECUTION,
+        "severity": Severity.HIGH,
+        "description": "new Function()コンストラクタが使用されている（evalと同等の動的コード実行）",
+        "cwe": "CWE-506",
+    },
+    # process.env exfiltration via http/https in Node.js
+    {
+        "id": "CJS_ENV_EXFIL",
+        "pattern": re.compile(
+            r"""process\.env\b.{0,100}(?:https?\.(?:get|request)|fetch\s*\(|axios|node-fetch)""",
+            re.IGNORECASE | re.DOTALL,
+        ),
+        "category": FindingCategory.EXFILTRATION,
+        "severity": Severity.CRITICAL,
+        "description": "process.envの内容をHTTPで外部送信するパターンが検出された",
+        "cwe": "CWE-200",
+    },
+    # Obfuscated child_process access via string indexing
+    {
+        "id": "CJS_CHILD_PROCESS_OBFUSCATED",
+        "pattern": re.compile(
+            r"""require\s*\(\s*['"]child_process['"]\s*\)\s*\[""",
+            re.IGNORECASE,
+        ),
+        "category": FindingCategory.OBFUSCATION,
+        "severity": Severity.HIGH,
+        "description": "child_processモジュールにブラケット記法でアクセスしている（難読化）",
+        "cwe": "CWE-506",
+    },
+    # eval(Buffer.from(...).toString()) — common npm attack
+    {
+        "id": "CJS_EVAL_BUFFER",
+        "pattern": re.compile(
+            r"""eval\s*\(\s*Buffer\.from\s*\(""",
+            re.IGNORECASE,
+        ),
+        "category": FindingCategory.OBFUSCATION,
+        "severity": Severity.CRITICAL,
+        "description": "eval(Buffer.from(...))による難読化コード実行が検出された（npm典型攻撃）",
+        "cwe": "CWE-506",
+    },
 ]

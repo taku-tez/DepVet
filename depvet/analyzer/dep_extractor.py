@@ -215,6 +215,9 @@ def extract_new_dependencies(diff_content: str, filepath: str = "") -> list[NewD
     if "cargo.toml" in fname:
         return _extract_cargo_deps(diff_content, filepath)
 
+    if "cargo.lock" in fname:
+        return _extract_cargo_lock_deps(diff_content, filepath)
+
     if any(fname.endswith(ext) for ext in (".toml", ".cfg", ".txt", "requirements")):
         return _extract_pypi_deps(diff_content, filepath)
 
@@ -433,5 +436,60 @@ def _extract_cargo_deps(diff_content: str, filepath: str = "Cargo.toml") -> list
                         line_number=line_number,
                     )
                 )
+
+    return deps
+
+
+# ─── Cargo / Cargo.lock ──────────────────────────────────────────────────
+
+# Cargo.lock format:
+#   [[package]]
+#   name = "serde"
+#   version = "1.0.203"
+
+_CARGO_LOCK_NAME_RE = re.compile(r'^name\s*=\s*"(?P<name>[^"]+)"')
+_CARGO_LOCK_VERSION_RE = re.compile(r'^version\s*=\s*"(?P<version>[^"]+)"')
+
+
+def _extract_cargo_lock_deps(diff_content: str, filepath: str = "Cargo.lock") -> list[NewDependency]:
+    """Extract newly added crate entries from a Cargo.lock diff."""
+    deps: list[NewDependency] = []
+    pending_name: str | None = None
+    pending_line: int = 0
+    line_number = 0
+
+    for raw in diff_content.splitlines():
+        line_number += 1
+
+        if not raw.startswith("+") or raw.startswith("+++"):
+            if not raw.startswith("-"):
+                pending_name = None
+            continue
+
+        line = raw[1:].strip()
+
+        if line == "[[package]]":
+            pending_name = None
+            continue
+
+        m_name = _CARGO_LOCK_NAME_RE.match(line)
+        if m_name:
+            pending_name = m_name.group("name")
+            pending_line = line_number
+            continue
+
+        m_ver = _CARGO_LOCK_VERSION_RE.match(line)
+        if m_ver and pending_name:
+            deps.append(
+                NewDependency(
+                    name=pending_name,
+                    version_spec=m_ver.group("version"),
+                    ecosystem="cargo",
+                    manifest_file=filepath,
+                    is_dev=False,
+                    line_number=pending_line,
+                )
+            )
+            pending_name = None
 
     return deps

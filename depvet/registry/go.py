@@ -89,34 +89,65 @@ class GoModulesMonitor(BaseRegistryMonitor):
 
         return releases, {"modules": new_known}
 
+    # Fallback list when the search API is unavailable
+    _POPULAR_FALLBACK = [
+        "github.com/gin-gonic/gin",
+        "github.com/gorilla/mux",
+        "github.com/stretchr/testify",
+        "github.com/spf13/cobra",
+        "github.com/spf13/viper",
+        "github.com/uber-go/zap",
+        "github.com/sirupsen/logrus",
+        "github.com/pkg/errors",
+        "github.com/go-redis/redis",
+        "gorm.io/gorm",
+        "github.com/golang/protobuf",
+        "google.golang.org/grpc",
+        "github.com/aws/aws-sdk-go",
+        "github.com/docker/docker",
+        "k8s.io/client-go",
+        "github.com/hashicorp/vault",
+        "github.com/prometheus/client_golang",
+        "go.opentelemetry.io/otel",
+        "github.com/google/uuid",
+        "github.com/go-chi/chi",
+    ]
+
     async def load_top_n(self, n: int) -> list[str]:
+        """Load top Go modules by import count from pkg.go.dev search API.
+
+        Falls back to a curated list if the API is unavailable.
         """
-        Go doesn't have a direct "top N" API.
-        Return a curated list of popular modules.
-        """
-        popular = [
-            "github.com/gin-gonic/gin",
-            "github.com/gorilla/mux",
-            "github.com/stretchr/testify",
-            "github.com/spf13/cobra",
-            "github.com/spf13/viper",
-            "github.com/uber-go/zap",
-            "github.com/sirupsen/logrus",
-            "github.com/pkg/errors",
-            "github.com/go-redis/redis",
-            "gorm.io/gorm",
-            "github.com/golang/protobuf",
-            "google.golang.org/grpc",
-            "github.com/aws/aws-sdk-go",
-            "github.com/docker/docker",
-            "k8s.io/client-go",
-            "github.com/hashicorp/vault",
-            "github.com/prometheus/client_golang",
-            "go.opentelemetry.io/otel",
-            "github.com/google/uuid",
-            "github.com/go-chi/chi",
-        ]
-        return popular[:n]
+        try:
+            results: list[str] = []
+            async with aiohttp.ClientSession() as session:
+                # pkg.go.dev search API returns popular modules sorted by relevance
+                for query in ("", "github.com", "google.golang.org", "go.uber.org"):
+                    if len(results) >= n:
+                        break
+                    url = "https://pkg.go.dev/search"
+                    params = {"q": query, "m": "package", "limit": min(n, 100)}
+                    resp = await retry_request(session, "GET", url, params=params, timeout=_TIMEOUT)
+                    async with resp:
+                        if resp.status != 200:
+                            continue
+                        text = await resp.text()
+                    # Parse module paths from search result HTML
+                    # Each result has data-href="/mod/github.com/..." or similar
+                    import re
+
+                    for m in re.finditer(r'data-href="/(?:mod/)?([^"@?]+)"', text):
+                        mod = m.group(1).strip("/")
+                        if mod and mod not in results and "." in mod:
+                            results.append(mod)
+                            if len(results) >= n:
+                                break
+            if results:
+                return results[:n]
+        except Exception as e:
+            logger.warning("Failed to fetch Go top-N from pkg.go.dev: %s", e)
+
+        return self._POPULAR_FALLBACK[:n]
 
     async def _list_versions(self, module: str, session: aiohttp.ClientSession) -> list[str]:
         """List available versions for a Go module."""
