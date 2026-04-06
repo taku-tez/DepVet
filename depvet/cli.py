@@ -120,9 +120,9 @@ def cli(ctx: click.Context, verbose: bool, config: Optional[str], log_format: st
 
 
 @cli.command()
-@click.argument("package")
-@click.argument("old_version")
-@click.argument("new_version")
+@click.argument("package", metavar="PACKAGE", type=str)
+@click.argument("old_version", metavar="OLD_VERSION", type=str)
+@click.argument("new_version", metavar="NEW_VERSION", type=str)
 @click.option("--npm", "ecosystem", flag_value="npm", help="Use npm ecosystem")
 @click.option("--pypi", "ecosystem", flag_value="pypi", default=True, help="Use PyPI (default)")
 @click.option("--go", "ecosystem", flag_value="go", help="Use Go modules ecosystem")
@@ -248,13 +248,13 @@ async def _scan(config, package, old_version, new_version, ecosystem, json_outpu
 
 
 @cli.command()
-@click.argument("package")
-@click.argument("old_version")
-@click.argument("new_version")
-@click.option("--npm", "ecosystem", flag_value="npm")
-@click.option("--pypi", "ecosystem", flag_value="pypi", default=True)
-@click.option("--go", "ecosystem", flag_value="go")
-@click.option("--cargo", "ecosystem", flag_value="cargo")
+@click.argument("package", metavar="PACKAGE", type=str)
+@click.argument("old_version", metavar="OLD_VERSION", type=str)
+@click.argument("new_version", metavar="NEW_VERSION", type=str)
+@click.option("--npm", "ecosystem", flag_value="npm", help="Use npm ecosystem")
+@click.option("--pypi", "ecosystem", flag_value="pypi", default=True, help="Use PyPI (default)")
+@click.option("--go", "ecosystem", flag_value="go", help="Use Go modules ecosystem")
+@click.option("--cargo", "ecosystem", flag_value="cargo", help="Use Cargo (Rust) ecosystem")
 @click.option("--output", "-o", type=click.Path(), default=None, help="Output file")
 @click.pass_context
 def diff(ctx, package, old_version, new_version, ecosystem, output):
@@ -371,14 +371,18 @@ async def _analyze(config, diff_file, json_output, package, old_version, new_ver
 @click.option("--no-pypi", is_flag=True, help="Skip PyPI monitoring")
 @click.option("--no-analyze", is_flag=True, help="Skip LLM analysis (report releases only)")
 @click.option("--slack", is_flag=True, help="Enable Slack alerts")
+@click.option("--model", default=None, help="Override LLM model")
+@click.option("--json", "json_output", is_flag=True, help="Output alerts as JSON")
 @click.pass_context
-def monitor(ctx, top, sbom, interval, once, no_npm, no_pypi, no_analyze, slack):
+def monitor(ctx, top, sbom, interval, once, no_npm, no_pypi, no_analyze, slack, model, json_output):
     """Monitor package registries for new releases."""
     config = ctx.obj["config"]
+    if model:
+        config.llm.model = model
     # CLI flag overrides config; config provides the default
     effective_interval = interval if interval != 300 else config.monitor.interval
     # top=0 means "use config defaults" — pass 0 so _monitor can use per-ecosystem config values
-    asyncio.run(_monitor(config, top, sbom, effective_interval, once, no_npm, no_pypi, no_analyze, slack))
+    asyncio.run(_monitor(config, top, sbom, effective_interval, once, no_npm, no_pypi, no_analyze, slack, json_output))
 
 
 async def _preflight_checks(config, no_analyze: bool, slack: bool, sbom) -> None:
@@ -452,7 +456,7 @@ async def _preflight_checks(config, no_analyze: bool, slack: bool, sbom) -> None
         click.echo("  ✅ Pre-flight checks passed")
 
 
-async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyze, slack):
+async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyze, slack, json_output=False):
     import signal
     import time as _time
 
@@ -561,7 +565,7 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
 
     # Alert router
     router = AlertRouter(min_severity=config.alert.min_severity, dlq=dlq)
-    router.register(StdoutAlerter())
+    router.register(StdoutAlerter(json_mode=json_output))
     if slack:
         slack_webhook = os.environ.get(config.alert.slack_webhook_env)
         router.register(SlackAlerter(webhook_url=slack_webhook))
@@ -840,6 +844,39 @@ async def _validate(sbom_path, sbom_format, check_osv, json_output):
             severity_icon = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡"}.get(hit.severity, "🔵")
             click.echo(f"  {severity_icon} [OSV:{hit.osv_id}] {hit.ecosystem}/{hit.name}@{hit.version}")
             click.echo(f"     {hit.summary}")
+
+
+# ─────────────────────────────────────────────────────────────
+# depvet config
+# ─────────────────────────────────────────────────────────────
+
+
+@cli.group("config")
+@click.pass_context
+def config_group(ctx):
+    """View configuration."""
+    pass
+
+
+@config_group.command("show")
+@click.pass_context
+def config_show(ctx):
+    """Display the active configuration."""
+    config = ctx.obj["config"]
+    sections = {
+        "llm": config.llm,
+        "monitor": config.monitor,
+        "watchlist": config.watchlist,
+        "diff": config.diff,
+        "alert": config.alert,
+        "state": config.state,
+        "securify": config.securify,
+    }
+    for name, section in sections.items():
+        click.echo(f"[{name}]")
+        for key, value in section.model_dump().items():
+            click.echo(f"  {key} = {value!r}")
+        click.echo()
 
 
 # ─────────────────────────────────────────────────────────────
