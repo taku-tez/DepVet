@@ -926,12 +926,28 @@ def watchlist(ctx):
 @click.argument("sbom_path", type=click.Path(exists=True))
 @click.pass_context
 def watchlist_import(ctx, sbom_path):
-    """Import packages from a SBOM file."""
+    """Import packages from a SBOM file (CycloneDX/SPDX)."""
     from depvet.watchlist.manager import WatchlistManager
 
     wl = WatchlistManager()
     count = wl.import_from_sbom(sbom_path)
     click.echo(f"✅ Imported {count} packages from {sbom_path}")
+
+
+@watchlist.command("import-lock")
+@click.argument("lockfile_path", type=click.Path(exists=True))
+@click.pass_context
+def watchlist_import_lock(ctx, lockfile_path):
+    """Import packages from a lockfile.
+
+    Supported: package-lock.json, yarn.lock, Pipfile.lock,
+    poetry.lock, go.sum, Cargo.lock
+    """
+    from depvet.watchlist.manager import WatchlistManager
+
+    wl = WatchlistManager()
+    count = wl.import_from_lockfile(lockfile_path)
+    click.echo(f"✅ Imported {count} packages from {lockfile_path}")
 
 
 @watchlist.command("add")

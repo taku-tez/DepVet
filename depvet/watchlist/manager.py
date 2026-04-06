@@ -67,6 +67,16 @@ class WatchlistManager:
         self._save()
         return len(entries)
 
+    def import_from_lockfile(self, path: str) -> int:
+        """Import dependencies from a lockfile (package-lock.json, yarn.lock, etc.)."""
+        from depvet.watchlist.lockfile import parse_lockfile
+
+        entries = parse_lockfile(path)
+        for entry in entries:
+            self._explicit.add(entry.name, entry.ecosystem)
+        self._save()
+        return len(entries)
+
     def as_set(self, ecosystem: str) -> set[str]:
         return self._explicit.as_set(ecosystem)
 
