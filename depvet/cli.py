@@ -127,6 +127,7 @@ def cli(ctx: click.Context, verbose: bool, config: Optional[str], log_format: st
 @click.option("--pypi", "ecosystem", flag_value="pypi", default=True, help="Use PyPI (default)")
 @click.option("--go", "ecosystem", flag_value="go", help="Use Go modules ecosystem")
 @click.option("--cargo", "ecosystem", flag_value="cargo", help="Use Cargo (Rust) ecosystem")
+@click.option("--maven", "ecosystem", flag_value="maven", help="Use Maven ecosystem (groupId:artifactId)")
 @click.option("--json", "json_output", is_flag=True, help="Output as JSON")
 @click.option("--model", default=None, help="Override LLM model")
 @click.option("--no-triage", is_flag=True, help="Skip Stage 1 triage")
@@ -257,6 +258,7 @@ async def _scan(config, package, old_version, new_version, ecosystem, json_outpu
 @click.option("--pypi", "ecosystem", flag_value="pypi", default=True, help="Use PyPI (default)")
 @click.option("--go", "ecosystem", flag_value="go", help="Use Go modules ecosystem")
 @click.option("--cargo", "ecosystem", flag_value="cargo", help="Use Cargo (Rust) ecosystem")
+@click.option("--maven", "ecosystem", flag_value="maven", help="Use Maven ecosystem (groupId:artifactId)")
 @click.option("--output", "-o", type=click.Path(), default=None, help="Output file")
 @click.pass_context
 def diff(ctx, package, old_version, new_version, ecosystem, output):
@@ -531,10 +533,6 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
     if "cargo" in active_ecosystems:
         monitors.append(CargoMonitor())
     if "maven" in active_ecosystems:
-        click.echo(
-            "⚠️  Maven monitoring tracks releases but scan/diff/download is not yet supported.",
-            err=True,
-        )
         monitors.append(MavenMonitor())
 
     if not monitors:
@@ -931,11 +929,6 @@ def watchlist_add(ctx, name, ecosystem):
         if ":" not in name:
             click.echo("❌ Maven artifact must be 'groupId:artifactId' format (e.g. com.google.guava:guava)", err=True)
             sys.exit(1)
-        click.echo(
-            "⚠️  Maven is supported for SBOM import and watchlist tracking, "
-            "but scan/diff/download is not yet implemented.",
-            err=True,
-        )
     from depvet.watchlist.manager import WatchlistManager
 
     wl = WatchlistManager()

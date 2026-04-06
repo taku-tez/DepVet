@@ -1,4 +1,4 @@
-"""Package downloader for PyPI and npm."""
+"""Package downloader for PyPI, npm, Go, Cargo, and Maven."""
 
 from __future__ import annotations
 
@@ -134,11 +134,7 @@ async def download_package(
     elif ecosystem == "cargo":
         return await download_cargo_crate(name, version, dest_dir, session)
     elif ecosystem == "maven":
-        raise NotImplementedError(
-            f"Maven package download is not yet implemented. "
-            f"Cannot download {name}=={version} from Maven Central. "
-            "Maven support is limited to SBOM import and watchlist tracking."
-        )
+        return await download_maven_artifact(name, version, dest_dir, session)
     else:
         raise ValueError(f"Unsupported ecosystem: {ecosystem}")
 
@@ -203,6 +199,75 @@ async def download_cargo_crate(
                     f.write(chunk)
 
         logger.info(f"Downloaded Cargo crate {name}@{version} -> {dest_path}")
+        return dest_path
+
+    finally:
+        if close_session:
+            await session.close()
+
+
+MAVEN_REPO_URL = "https://repo1.maven.org/maven2"
+
+
+def _maven_artifact_url(group_id: str, artifact_id: str, version: str, classifier: str = "", ext: str = "jar") -> str:
+    """Build a Maven Central download URL.
+
+    Example: com.google.guava:guava:33.0.0-jre
+    → https://repo1.maven.org/maven2/com/google/guava/guava/33.0.0-jre/guava-33.0.0-jre.jar
+    """
+    group_path = group_id.replace(".", "/")
+    suffix = f"-{classifier}" if classifier else ""
+    return f"{MAVEN_REPO_URL}/{group_path}/{artifact_id}/{version}/{artifact_id}-{version}{suffix}.{ext}"
+
+
+async def download_maven_artifact(
+    name: str,
+    version: str,
+    dest_dir: Path,
+    session: Optional[aiohttp.ClientSession] = None,
+) -> Optional[Path]:
+    """Download a Maven artifact (sources JAR preferred, plain JAR fallback).
+
+    ``name`` must be ``groupId:artifactId`` format.
+    """
+    if ":" not in name:
+        logger.warning(f"Maven artifact must be 'groupId:artifactId': {name}")
+        return None
+
+    group_id, artifact_id = name.split(":", 1)
+    close_session = session is None
+    if session is None:
+        session = aiohttp.ClientSession()
+
+    try:
+        # Try sources JAR first (contains actual .java source files for diff)
+        sources_url = _maven_artifact_url(group_id, artifact_id, version, classifier="sources")
+        resp = await retry_request(session, "GET", sources_url, timeout=_METADATA_TIMEOUT)
+        async with resp:
+            if resp.status == 200:
+                filename = f"{artifact_id}-{version}-sources.jar"
+                dest_path = dest_dir / filename
+                with open(dest_path, "wb") as f:
+                    async for chunk in resp.content.iter_chunked(65536):
+                        f.write(chunk)
+                logger.info(f"Downloaded Maven sources {name}@{version} -> {dest_path}")
+                return dest_path
+
+        # Fallback to plain JAR (contains .class files, less useful for diff
+        # but still contains resources, META-INF, and potentially .java/.kt/.scala)
+        jar_url = _maven_artifact_url(group_id, artifact_id, version)
+        resp = await retry_request(session, "GET", jar_url, timeout=_DOWNLOAD_TIMEOUT)
+        async with resp:
+            if resp.status != 200:
+                logger.warning(f"Maven Central returned {resp.status} for {name}@{version}")
+                return None
+            filename = f"{artifact_id}-{version}.jar"
+            dest_path = dest_dir / filename
+            with open(dest_path, "wb") as f:
+                async for chunk in resp.content.iter_chunked(65536):
+                    f.write(chunk)
+
+        logger.info(f"Downloaded Maven JAR {name}@{version} -> {dest_path}")
         return dest_path
 
     finally:

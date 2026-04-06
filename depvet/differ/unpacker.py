@@ -25,7 +25,7 @@ def unpack(archive_path: Path, dest_dir: Path) -> Path:
     name_lower = archive_path.name.lower()
     last_suffix = archive_path.suffix.lower()
 
-    if last_suffix in (".whl", ".zip"):
+    if last_suffix in (".whl", ".zip", ".jar"):
         return _unpack_zip(archive_path, dest_dir)
     elif name_lower.endswith(".tar.gz") or last_suffix == ".tgz":
         return _unpack_tarball(archive_path, dest_dir)

@@ -22,11 +22,11 @@ class TestMavenSupportMatrix:
             assert result.exit_code == 0, result.output
             assert "Added" in result.output
 
-    def test_watchlist_add_maven_shows_warning(self):
+    def test_watchlist_add_maven_succeeds(self):
         with runner.isolated_filesystem():
             result = runner.invoke(cli, ["watchlist", "add", "org.example:foo", "--ecosystem", "maven"])
-            # warning goes to stderr, captured in output by CliRunner
-            assert "not yet implemented" in result.output or "not yet" in (result.output + "")
+            assert result.exit_code == 0
+            assert "Added" in result.output
 
     def test_watchlist_remove_accepts_maven(self):
         """watchlist remove --ecosystem maven must not be rejected as invalid choice."""
@@ -35,11 +35,16 @@ class TestMavenSupportMatrix:
         assert "Invalid value" not in result.output
 
     @pytest.mark.asyncio
-    async def test_download_maven_raises_not_implemented(self):
+    async def test_download_maven_dispatches_to_downloader(self):
+        from unittest.mock import patch as _patch
+
         from depvet.differ.downloader import download_package
 
-        with pytest.raises(NotImplementedError, match="Maven"):
-            await download_package("org.springframework:spring-core", "5.3.0", "maven", Path("/tmp"))
+        with _patch("depvet.differ.downloader.download_maven_artifact") as mock_dl:
+            mock_dl.return_value = Path("/tmp/fake.jar")
+            result = await download_package("org.springframework:spring-core", "5.3.0", "maven", Path("/tmp"))
+        assert result == Path("/tmp/fake.jar")
+        mock_dl.assert_called_once()
 
     def test_maven_ecosystem_in_watchlist_choice(self):
         """watchlist add --help must list maven as a valid choice."""
