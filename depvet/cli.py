@@ -482,15 +482,15 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
     from depvet.alert.dlq import DeadLetterQueue
     from depvet.analyzer.triage import TriageAnalyzer
     from depvet.analyzer.deep import DeepAnalyzer
+    from depvet.metrics import MonitorMetrics
+    from depvet.health import write_health
 
     # --- Pre-flight checks ---
     await _preflight_checks(config, no_analyze, slack, sbom)
 
     # --- Graceful shutdown setup ---
     shutdown_event = asyncio.Event()
-    releases_processed = 0
-    cycles_completed = 0
-    start_time = _time.monotonic()
+    metrics = MonitorMetrics()
 
     def _request_shutdown(signame: str) -> None:
         logger.info("Received %s, initiating graceful shutdown...", signame, extra={"signal": signame})
@@ -622,7 +622,6 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                 click.echo(f"  [{eco}] {len(releases)} new release(s)")
 
             async def _process_one(release, _eco=eco):
-                nonlocal releases_processed
                 click.echo(f"    📦 {release.name} {release.version}")
                 if no_analyze or not release.previous_version:
                     # Release-only notification: dispatch to alert backends without LLM analysis
@@ -703,7 +702,8 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
 
                             event = AlertEvent(release=release, verdict=verdict)
                             await router.dispatch(event)
-                    releases_processed += 1
+                            metrics.record_analysis(verdict.tokens_used, verdict.analysis_duration_ms)
+                    metrics.record_release(_eco)
                 except Exception as e:  # Outermost catch-all for entire analysis pipeline
                     logger.error(f"Analysis failed for {release.name}: {e}")
 
@@ -729,7 +729,8 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
             if not releases or not (0 < _batch_limit < len(releases)):
                 state.set(eco, new_state)
 
-        cycles_completed += 1
+        metrics.cycles_completed += 1
+        write_health(metrics=metrics)
 
         if once:
             break
@@ -742,12 +743,21 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
             pass  # normal: interval elapsed
 
     # --- Shutdown summary ---
-    elapsed = _time.monotonic() - start_time
+    metrics.alerts_sent = router.dispatched_count
+    metrics.log_summary()
+    write_health(metrics=metrics, status="shutdown")
+
     dlq_pending = dlq.count()
     click.echo(
-        f"\n  ✅ Shutdown: {releases_processed} releases processed, "
-        f"{router.dispatched_count} alerts sent, {cycles_completed} cycle(s) in {elapsed:.0f}s"
+        f"\n  ✅ Shutdown: {metrics.releases_processed} releases processed, "
+        f"{metrics.alerts_sent} alerts sent, {metrics.cycles_completed} cycle(s) in {metrics.uptime_seconds:.0f}s"
     )
+    if metrics.total_tokens_used:
+        click.echo(
+            f"     LLM: {metrics.total_tokens_used} tokens, "
+            f"{metrics.analyses_completed} analyses, "
+            f"avg {metrics.avg_analysis_ms:.0f}ms/analysis"
+        )
     if dlq_pending:
         click.echo(f"  ⚠️  DLQ has {dlq_pending} pending entries (run `depvet dlq list`)")
 
@@ -1047,6 +1057,44 @@ def dlq_clear(ctx):
     q = DeadLetterQueue(path=config.alert.dlq_path)
     n = q.clear()
     click.echo(f"Cleared {n} DLQ entries.")
+
+
+# ─────────────────────────────────────────────────────────────
+# depvet health
+# ─────────────────────────────────────────────────────────────
+
+
+@cli.command()
+@click.option("--json", "json_output", is_flag=True, help="Output as JSON")
+def health(json_output):
+    """Check monitor health status."""
+    import json as _json
+
+    from depvet.health import read_health
+
+    data = read_health()
+    if data is None:
+        click.echo("No health file found (monitor not running or never started).")
+        sys.exit(1)
+
+    if json_output:
+        click.echo(_json.dumps(data, indent=2, ensure_ascii=False))
+    else:
+        status = data.get("status", "unknown")
+        icon = "✅" if status == "ok" else "🛑"
+        click.echo(f"{icon} Status: {status}")
+        click.echo(f"   PID: {data.get('pid', '?')}")
+        click.echo(f"   Last poll: {data.get('last_poll_at', '?')}")
+        click.echo(f"   Uptime: {data.get('uptime_seconds', '?')}s")
+        click.echo(f"   Cycles: {data.get('cycles_completed', '?')}")
+        click.echo(f"   Releases: {data.get('releases_processed', '?')}")
+        click.echo(f"   Alerts: {data.get('alerts_sent', '?')}")
+        if data.get("total_tokens_used"):
+            click.echo(f"   Tokens: {data.get('total_tokens_used', 0)}")
+            click.echo(f"   Analyses: {data.get('analyses_completed', 0)}")
+            click.echo(f"   Avg analysis: {data.get('avg_analysis_ms', 0)}ms")
+
+    sys.exit(0 if data.get("status") == "ok" else 1)
 
 
 if __name__ == "__main__":

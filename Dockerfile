@@ -83,9 +83,9 @@ WORKDIR /workspace
 # Drop to non-root
 USER depvet
 
-# Health check: verify the CLI is importable
+# Health check: verify the package is importable and health file is fresh
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD ["python", "-c", "from depvet.cli import cli; cli(['--version'], standalone_mode=False)"]
+    CMD ["python", "-c", "from depvet.health import check_health; check_health()"]
 
 ENTRYPOINT ["depvet"]
 CMD ["--help"]
