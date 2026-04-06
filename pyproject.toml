@@ -50,6 +50,9 @@ depvet = "depvet.cli:cli"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "slow: marks tests that call real external APIs (deselect with '-m \"not slow\"')",
+]
 
 [tool.mypy]
 python_version = "3.11"
