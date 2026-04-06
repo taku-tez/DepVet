@@ -9,7 +9,12 @@ from depvet.alert.stdout import StdoutAlerter, format_alert_text
 from depvet.models.alert import AlertEvent
 from depvet.models.package import Release
 from depvet.models.verdict import (
-    DiffStats, Finding, FindingCategory, Severity, Verdict, VerdictType,
+    DiffStats,
+    Finding,
+    FindingCategory,
+    Severity,
+    Verdict,
+    VerdictType,
 )
 
 
@@ -31,7 +36,9 @@ def make_verdict(verdict=VerdictType.MALICIOUS, severity=Severity.CRITICAL, find
 
 def make_release(name="requests", version="2.32.0", ecosystem="pypi"):
     return Release(
-        name=name, version=version, ecosystem=ecosystem,
+        name=name,
+        version=version,
+        ecosystem=ecosystem,
         previous_version="2.31.0",
         published_at="2026-01-01T00:00:00+00:00",
         url=f"https://pypi.org/project/{name}/{version}/",
@@ -46,6 +53,7 @@ def make_event(verdict=VerdictType.MALICIOUS, severity=Severity.CRITICAL):
 
 
 # ─── AlertRouter._should_alert ────────────────────────────────────────────────
+
 
 def test_should_alert_malicious_critical():
     router = AlertRouter(min_severity="MEDIUM")
@@ -84,6 +92,7 @@ def test_should_alert_unknown_critical():
 
 
 # ─── AlertRouter.dispatch ─────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_dispatch_calls_registered_alerters():
@@ -141,6 +150,7 @@ async def test_dispatch_calls_multiple_alerters():
 
 # ─── StdoutAlerter.format_alert_text ─────────────────────────────────────────
 
+
 def test_format_alert_text_malicious():
     event = make_event(VerdictType.MALICIOUS, Severity.CRITICAL)
     text = format_alert_text(event)
@@ -188,6 +198,7 @@ def test_format_alert_text_benign():
 
 
 # ─── StdoutAlerter.send (JSON mode) ──────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_stdout_alerter_json_output(capsys):

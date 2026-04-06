@@ -69,14 +69,16 @@ class MavenMonitor(BaseRegistryMonitor):
                             if ts
                             else datetime.now(timezone.utc).isoformat()
                         )
-                        releases.append(Release(
-                            name=artifact,
-                            version=latest["version"],
-                            ecosystem="maven",
-                            previous_version=prev_version,
-                            published_at=published_at,
-                            url=f"https://search.maven.org/artifact/{group_id}/{artifact_id}/{latest['version']}/jar",
-                        ))
+                        releases.append(
+                            Release(
+                                name=artifact,
+                                version=latest["version"],
+                                ecosystem="maven",
+                                previous_version=prev_version,
+                                published_at=published_at,
+                                url=f"https://search.maven.org/artifact/{group_id}/{artifact_id}/{latest['version']}/jar",
+                            )
+                        )
                         new_known[artifact] = latest["version"]
 
                 except Exception as e:
@@ -105,9 +107,7 @@ class MavenMonitor(BaseRegistryMonitor):
         ]
         return popular[:n]
 
-    async def _get_versions(
-        self, group_id: str, artifact_id: str, session: aiohttp.ClientSession
-    ) -> list[dict]:
+    async def _get_versions(self, group_id: str, artifact_id: str, session: aiohttp.ClientSession) -> list[dict]:
         """Get version list from Maven Central search API."""
         params = {
             "q": f"g:{group_id}+AND+a:{artifact_id}",
@@ -115,9 +115,7 @@ class MavenMonitor(BaseRegistryMonitor):
             "rows": "20",
             "wt": "json",
         }
-        async with session.get(
-            SEARCH_API, params=params, timeout=aiohttp.ClientTimeout(total=15)
-        ) as resp:
+        async with session.get(SEARCH_API, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
             if resp.status != 200:
                 logger.warning(f"Maven search API returned {resp.status}")
                 return []

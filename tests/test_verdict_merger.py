@@ -30,10 +30,24 @@ def test_merge_malicious_wins():
     merger = VerdictMerger()
     raw = [
         {"verdict": "BENIGN", "severity": "NONE", "confidence": 0.9, "findings": [], "summary": "OK"},
-        {"verdict": "MALICIOUS", "severity": "CRITICAL", "confidence": 0.97, "findings": [
-            {"category": "EXFILTRATION", "description": "Creds sent", "file": "auth.py",
-             "line_start": 10, "line_end": 20, "evidence": "os.environ", "cwe": "CWE-200", "severity": "CRITICAL"}
-        ], "summary": "Malicious code found"},
+        {
+            "verdict": "MALICIOUS",
+            "severity": "CRITICAL",
+            "confidence": 0.97,
+            "findings": [
+                {
+                    "category": "EXFILTRATION",
+                    "description": "Creds sent",
+                    "file": "auth.py",
+                    "line_start": 10,
+                    "line_end": 20,
+                    "evidence": "os.environ",
+                    "cwe": "CWE-200",
+                    "severity": "CRITICAL",
+                }
+            ],
+            "summary": "Malicious code found",
+        },
     ]
     result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0)
     assert result.verdict == VerdictType.MALICIOUS
@@ -44,10 +58,24 @@ def test_merge_suspicious_over_benign():
     merger = VerdictMerger()
     raw = [
         {"verdict": "BENIGN", "severity": "NONE", "confidence": 0.8, "findings": [], "summary": "OK"},
-        {"verdict": "SUSPICIOUS", "severity": "MEDIUM", "confidence": 0.6, "findings": [
-            {"category": "OBFUSCATION", "description": "base64", "file": "init.py",
-             "line_start": 1, "line_end": 5, "evidence": "b64decode", "cwe": None, "severity": "MEDIUM"}
-        ], "summary": "Suspicious"},
+        {
+            "verdict": "SUSPICIOUS",
+            "severity": "MEDIUM",
+            "confidence": 0.6,
+            "findings": [
+                {
+                    "category": "OBFUSCATION",
+                    "description": "base64",
+                    "file": "init.py",
+                    "line_start": 1,
+                    "line_end": 5,
+                    "evidence": "b64decode",
+                    "cwe": None,
+                    "severity": "MEDIUM",
+                }
+            ],
+            "summary": "Suspicious",
+        },
     ]
     result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0)
     assert result.verdict == VerdictType.SUSPICIOUS
@@ -55,8 +83,16 @@ def test_merge_suspicious_over_benign():
 
 def test_merge_deduplicates_findings():
     merger = VerdictMerger()
-    finding = {"category": "OBFUSCATION", "description": "base64", "file": "init.py",
-               "line_start": 1, "line_end": 5, "evidence": "b64decode", "cwe": None, "severity": "MEDIUM"}
+    finding = {
+        "category": "OBFUSCATION",
+        "description": "base64",
+        "file": "init.py",
+        "line_start": 1,
+        "line_end": 5,
+        "evidence": "b64decode",
+        "cwe": None,
+        "severity": "MEDIUM",
+    }
     raw = [
         {"verdict": "SUSPICIOUS", "severity": "MEDIUM", "confidence": 0.7, "findings": [finding], "summary": "A"},
         {"verdict": "SUSPICIOUS", "severity": "MEDIUM", "confidence": 0.7, "findings": [finding], "summary": "B"},
@@ -79,8 +115,22 @@ def test_merge_combines_chunks_count():
 def test_merge_tokens_summed():
     merger = VerdictMerger()
     raw = [
-        {"verdict": "BENIGN", "severity": "NONE", "confidence": 0.9, "findings": [], "summary": "OK", "_tokens_used": 100},
-        {"verdict": "BENIGN", "severity": "NONE", "confidence": 0.9, "findings": [], "summary": "OK", "_tokens_used": 200},
+        {
+            "verdict": "BENIGN",
+            "severity": "NONE",
+            "confidence": 0.9,
+            "findings": [],
+            "summary": "OK",
+            "_tokens_used": 100,
+        },
+        {
+            "verdict": "BENIGN",
+            "severity": "NONE",
+            "confidence": 0.9,
+            "findings": [],
+            "summary": "OK",
+            "_tokens_used": 200,
+        },
     ]
     result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0)
     assert result.tokens_used == 300
@@ -88,12 +138,13 @@ def test_merge_tokens_summed():
 
 # ─── Rule injection into VerdictMerger ──────────────────────────────────────
 
+
 def test_rule_match_injected_into_findings():
     """Rule match not covered by LLM findings should be injected."""
     from depvet.analyzer.rules import RuleMatch
+
     merger = VerdictMerger()
-    raw = [{"verdict": "SUSPICIOUS", "severity": "MEDIUM", "confidence": 0.6,
-            "findings": [], "summary": "Suspicious"}]
+    raw = [{"verdict": "SUSPICIOUS", "severity": "MEDIUM", "confidence": 0.6, "findings": [], "summary": "Suspicious"}]
     rule = RuleMatch(
         rule_id="OS_SYSTEM",
         category=FindingCategory.EXECUTION,
@@ -104,8 +155,7 @@ def test_rule_match_injected_into_findings():
         line_number=10,
         cwe="CWE-78",
     )
-    result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0,
-                          rule_matches=[rule])
+    result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0, rule_matches=[rule])
     assert len(result.findings) == 1
     assert result.findings[0].file == "setup.py"
     assert result.findings[0].category == FindingCategory.EXECUTION
@@ -114,13 +164,28 @@ def test_rule_match_injected_into_findings():
 def test_rule_match_not_duplicated_if_already_in_llm():
     """Rule match with same file+category as LLM finding should not duplicate."""
     from depvet.analyzer.rules import RuleMatch
+
     merger = VerdictMerger()
-    raw = [{"verdict": "MALICIOUS", "severity": "CRITICAL", "confidence": 0.9,
-            "findings": [{
-                "category": "EXECUTION", "description": "exec found",
-                "file": "setup.py", "line_start": 10, "line_end": 10,
-                "evidence": "os.system", "cwe": "CWE-78", "severity": "HIGH"
-            }], "summary": "Malicious"}]
+    raw = [
+        {
+            "verdict": "MALICIOUS",
+            "severity": "CRITICAL",
+            "confidence": 0.9,
+            "findings": [
+                {
+                    "category": "EXECUTION",
+                    "description": "exec found",
+                    "file": "setup.py",
+                    "line_start": 10,
+                    "line_end": 10,
+                    "evidence": "os.system",
+                    "cwe": "CWE-78",
+                    "severity": "HIGH",
+                }
+            ],
+            "summary": "Malicious",
+        }
+    ]
     rule = RuleMatch(
         rule_id="OS_SYSTEM",
         category=FindingCategory.EXECUTION,
@@ -131,19 +196,20 @@ def test_rule_match_not_duplicated_if_already_in_llm():
         line_number=10,
         cwe="CWE-78",
     )
-    result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0,
-                          rule_matches=[rule])
+    result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0, rule_matches=[rule])
     # Should not have duplicates for (setup.py, EXECUTION)
-    execution_findings = [f for f in result.findings if f.category == FindingCategory.EXECUTION and f.file == "setup.py"]
+    execution_findings = [
+        f for f in result.findings if f.category == FindingCategory.EXECUTION and f.file == "setup.py"
+    ]
     assert len(execution_findings) == 1
 
 
 def test_rule_critical_escalates_benign_to_malicious():
     """BENIGN + CRITICAL rule → MALICIOUS."""
     from depvet.analyzer.rules import RuleMatch
+
     merger = VerdictMerger()
-    raw = [{"verdict": "BENIGN", "severity": "NONE", "confidence": 0.9,
-            "findings": [], "summary": "OK"}]
+    raw = [{"verdict": "BENIGN", "severity": "NONE", "confidence": 0.9, "findings": [], "summary": "OK"}]
     rule = RuleMatch(
         rule_id="EXEC_BASE64",
         category=FindingCategory.OBFUSCATION,
@@ -154,17 +220,16 @@ def test_rule_critical_escalates_benign_to_malicious():
         line_number=5,
         cwe="CWE-506",
     )
-    result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0,
-                          rule_matches=[rule])
+    result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0, rule_matches=[rule])
     assert result.verdict == VerdictType.MALICIOUS
 
 
 def test_rule_severity_escalates_verdict_severity():
     """Rule match with CRITICAL severity should escalate overall severity."""
     from depvet.analyzer.rules import RuleMatch
+
     merger = VerdictMerger()
-    raw = [{"verdict": "SUSPICIOUS", "severity": "LOW", "confidence": 0.5,
-            "findings": [], "summary": "Low risk"}]
+    raw = [{"verdict": "SUSPICIOUS", "severity": "LOW", "confidence": 0.5, "findings": [], "summary": "Low risk"}]
     rule = RuleMatch(
         rule_id="HARDCODED_IP",
         category=FindingCategory.NETWORK,
@@ -175,6 +240,5 @@ def test_rule_severity_escalates_verdict_severity():
         line_number=20,
         cwe="CWE-913",
     )
-    result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0,
-                          rule_matches=[rule])
+    result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0, rule_matches=[rule])
     assert result.severity == Severity.CRITICAL

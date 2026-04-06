@@ -36,14 +36,17 @@ def make_mock_session(responses: dict):
 
 # ─── Go transition analysis ───────────────────────────────────────────────────
 
+
 class TestGoTransition:
     @pytest.mark.asyncio
     async def test_basic_ok_no_signals(self):
         """Normal update with short gap → no signals."""
-        session = make_mock_session({
-            "v1.9.0.info": {"Version": "v1.9.0", "Time": "2023-01-01T00:00:00Z"},
-            "v1.9.1.info": {"Version": "v1.9.1", "Time": "2023-02-01T00:00:00Z"},
-        })
+        session = make_mock_session(
+            {
+                "v1.9.0.info": {"Version": "v1.9.0", "Time": "2023-01-01T00:00:00Z"},
+                "v1.9.1.info": {"Version": "v1.9.1", "Time": "2023-02-01T00:00:00Z"},
+            }
+        )
         ctx = await analyze_go_transition("github.com/gin-gonic/gin", "v1.9.0", "v1.9.1", session)
         assert ctx.ecosystem == "go"
         dormancy = [s for s in ctx.signals if "DORMANCY" in s.signal_id]
@@ -52,38 +55,44 @@ class TestGoTransition:
     @pytest.mark.asyncio
     async def test_long_dormancy_detected(self):
         """Gap > 365 days should trigger LONG_DORMANCY."""
-        session = make_mock_session({
-            "v1.0.0.info": {"Version": "v1.0.0", "Time": "2021-01-01T00:00:00Z"},
-            "v1.0.1.info": {"Version": "v1.0.1", "Time": "2023-06-01T00:00:00Z"},  # ~880 days
-        })
+        session = make_mock_session(
+            {
+                "v1.0.0.info": {"Version": "v1.0.0", "Time": "2021-01-01T00:00:00Z"},
+                "v1.0.1.info": {"Version": "v1.0.1", "Time": "2023-06-01T00:00:00Z"},  # ~880 days
+            }
+        )
         ctx = await analyze_go_transition("github.com/some/lib", "v1.0.0", "v1.0.1", session)
         assert any(s.signal_id == "LONG_DORMANCY" for s in ctx.signals)
 
     @pytest.mark.asyncio
     async def test_medium_dormancy_detected(self):
         """Gap 180-365 days → MEDIUM_DORMANCY."""
-        session = make_mock_session({
-            "v1.0.0.info": {"Version": "v1.0.0", "Time": "2023-01-01T00:00:00Z"},
-            "v1.0.1.info": {"Version": "v1.0.1", "Time": "2023-09-01T00:00:00Z"},  # ~243 days
-        })
+        session = make_mock_session(
+            {
+                "v1.0.0.info": {"Version": "v1.0.0", "Time": "2023-01-01T00:00:00Z"},
+                "v1.0.1.info": {"Version": "v1.0.1", "Time": "2023-09-01T00:00:00Z"},  # ~243 days
+            }
+        )
         ctx = await analyze_go_transition("github.com/some/lib", "v1.0.0", "v1.0.1", session)
         assert any(s.signal_id == "MEDIUM_DORMANCY" for s in ctx.signals)
 
     @pytest.mark.asyncio
     async def test_vcs_origin_changed(self):
         """VCS URL change should trigger CRITICAL VCS_ORIGIN_CHANGED."""
-        session = make_mock_session({
-            "v1.0.0.info": {
-                "Version": "v1.0.0",
-                "Time": "2023-01-01T00:00:00Z",
-                "Origin": {"URL": "https://github.com/legit/repo"},
-            },
-            "v1.0.1.info": {
-                "Version": "v1.0.1",
-                "Time": "2023-02-01T00:00:00Z",
-                "Origin": {"URL": "https://github.com/hijacker/repo"},
-            },
-        })
+        session = make_mock_session(
+            {
+                "v1.0.0.info": {
+                    "Version": "v1.0.0",
+                    "Time": "2023-01-01T00:00:00Z",
+                    "Origin": {"URL": "https://github.com/legit/repo"},
+                },
+                "v1.0.1.info": {
+                    "Version": "v1.0.1",
+                    "Time": "2023-02-01T00:00:00Z",
+                    "Origin": {"URL": "https://github.com/hijacker/repo"},
+                },
+            }
+        )
         ctx = await analyze_go_transition("github.com/some/lib", "v1.0.0", "v1.0.1", session)
         assert any(s.signal_id == "VCS_ORIGIN_CHANGED" for s in ctx.signals)
         vcs_signal = next(s for s in ctx.signals if s.signal_id == "VCS_ORIGIN_CHANGED")
@@ -93,16 +102,20 @@ class TestGoTransition:
     @pytest.mark.asyncio
     async def test_same_vcs_origin_no_signal(self):
         """Same VCS URL → no VCS_ORIGIN_CHANGED."""
-        session = make_mock_session({
-            "v1.0.0.info": {
-                "Version": "v1.0.0", "Time": "2023-01-01T00:00:00Z",
-                "Origin": {"URL": "https://github.com/legit/repo"},
-            },
-            "v1.0.1.info": {
-                "Version": "v1.0.1", "Time": "2023-02-01T00:00:00Z",
-                "Origin": {"URL": "https://github.com/legit/repo"},
-            },
-        })
+        session = make_mock_session(
+            {
+                "v1.0.0.info": {
+                    "Version": "v1.0.0",
+                    "Time": "2023-01-01T00:00:00Z",
+                    "Origin": {"URL": "https://github.com/legit/repo"},
+                },
+                "v1.0.1.info": {
+                    "Version": "v1.0.1",
+                    "Time": "2023-02-01T00:00:00Z",
+                    "Origin": {"URL": "https://github.com/legit/repo"},
+                },
+            }
+        )
         ctx = await analyze_go_transition("github.com/legit/repo", "v1.0.0", "v1.0.1", session)
         assert not any(s.signal_id == "VCS_ORIGIN_CHANGED" for s in ctx.signals)
 
@@ -117,15 +130,18 @@ class TestGoTransition:
     @pytest.mark.asyncio
     async def test_security_package_skips_dormancy(self):
         """golang.org/x/crypto should not get LONG_DORMANCY."""
-        session = make_mock_session({
-            "v0.9.0.info": {"Version": "v0.9.0", "Time": "2021-01-01T00:00:00Z"},
-            "v0.14.0.info": {"Version": "v0.14.0", "Time": "2023-06-01T00:00:00Z"},
-        })
+        session = make_mock_session(
+            {
+                "v0.9.0.info": {"Version": "v0.9.0", "Time": "2021-01-01T00:00:00Z"},
+                "v0.14.0.info": {"Version": "v0.14.0", "Time": "2023-06-01T00:00:00Z"},
+            }
+        )
         ctx = await analyze_go_transition("golang.org/x/crypto", "v0.9.0", "v0.14.0", session)
         assert not any("DORMANCY" in s.signal_id for s in ctx.signals)
 
 
 # ─── Cargo transition analysis ────────────────────────────────────────────────
+
 
 class TestCargoTransition:
     def _make_crate_response(self, versions_data: list[dict]) -> dict:
@@ -134,10 +150,12 @@ class TestCargoTransition:
     @pytest.mark.asyncio
     async def test_basic_ok_no_signals(self):
         """Normal update → no signals."""
-        data = self._make_crate_response([
-            {"num": "1.0.1", "created_at": "2023-02-01T00:00:00Z", "yanked": False},
-            {"num": "1.0.0", "created_at": "2023-01-01T00:00:00Z", "yanked": False},
-        ])
+        data = self._make_crate_response(
+            [
+                {"num": "1.0.1", "created_at": "2023-02-01T00:00:00Z", "yanked": False},
+                {"num": "1.0.0", "created_at": "2023-01-01T00:00:00Z", "yanked": False},
+            ]
+        )
         session = make_mock_session({"crates/test-crate": data})
         ctx = await analyze_cargo_transition("test-crate", "1.0.0", "1.0.1", session)
         assert ctx.ecosystem == "cargo"
@@ -146,10 +164,12 @@ class TestCargoTransition:
     @pytest.mark.asyncio
     async def test_long_dormancy_detected(self):
         """Gap > 365 days → LONG_DORMANCY."""
-        data = self._make_crate_response([
-            {"num": "2.0.0", "created_at": "2024-06-01T00:00:00.000000Z", "yanked": False},
-            {"num": "1.0.0", "created_at": "2021-01-01T00:00:00.000000Z", "yanked": False},
-        ])
+        data = self._make_crate_response(
+            [
+                {"num": "2.0.0", "created_at": "2024-06-01T00:00:00.000000Z", "yanked": False},
+                {"num": "1.0.0", "created_at": "2021-01-01T00:00:00.000000Z", "yanked": False},
+            ]
+        )
         session = make_mock_session({"crates/my-crate": data})
         ctx = await analyze_cargo_transition("my-crate", "1.0.0", "2.0.0", session)
         assert any(s.signal_id == "LONG_DORMANCY" for s in ctx.signals)
@@ -157,10 +177,12 @@ class TestCargoTransition:
     @pytest.mark.asyncio
     async def test_yanked_predecessor_detected(self):
         """If old version is yanked, YANKED_PREDECESSOR signal emitted."""
-        data = self._make_crate_response([
-            {"num": "1.0.1", "created_at": "2023-02-01T00:00:00.000000Z", "yanked": False},
-            {"num": "1.0.0", "created_at": "2023-01-01T00:00:00.000000Z", "yanked": True},
-        ])
+        data = self._make_crate_response(
+            [
+                {"num": "1.0.1", "created_at": "2023-02-01T00:00:00.000000Z", "yanked": False},
+                {"num": "1.0.0", "created_at": "2023-01-01T00:00:00.000000Z", "yanked": True},
+            ]
+        )
         session = make_mock_session({"crates/test-crate": data})
         ctx = await analyze_cargo_transition("test-crate", "1.0.0", "1.0.1", session)
         assert any(s.signal_id == "YANKED_PREDECESSOR" for s in ctx.signals)
@@ -168,10 +190,12 @@ class TestCargoTransition:
     @pytest.mark.asyncio
     async def test_not_yanked_no_signal(self):
         """Non-yanked predecessor → no YANKED_PREDECESSOR."""
-        data = self._make_crate_response([
-            {"num": "1.0.1", "created_at": "2023-02-01T00:00:00.000000Z", "yanked": False},
-            {"num": "1.0.0", "created_at": "2023-01-01T00:00:00.000000Z", "yanked": False},
-        ])
+        data = self._make_crate_response(
+            [
+                {"num": "1.0.1", "created_at": "2023-02-01T00:00:00.000000Z", "yanked": False},
+                {"num": "1.0.0", "created_at": "2023-01-01T00:00:00.000000Z", "yanked": False},
+            ]
+        )
         session = make_mock_session({"crates/test-crate": data})
         ctx = await analyze_cargo_transition("test-crate", "1.0.0", "1.0.1", session)
         assert not any(s.signal_id == "YANKED_PREDECESSOR" for s in ctx.signals)
@@ -186,6 +210,7 @@ class TestCargoTransition:
 
 
 # ─── get_transition_context routing ──────────────────────────────────────────
+
 
 class TestGetTransitionContextRouting:
     @pytest.mark.asyncio

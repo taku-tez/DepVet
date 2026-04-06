@@ -36,10 +36,7 @@ class WatchlistManager:
             logger.warning(f"Failed to load watchlist: {e}")
 
     def _save(self) -> None:
-        packages = [
-            {"name": e.name, "ecosystem": e.ecosystem}
-            for e in self._explicit.entries()
-        ]
+        packages = [{"name": e.name, "ecosystem": e.ecosystem} for e in self._explicit.entries()]
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with open(self._path, "w") as f:
             yaml.dump({"packages": packages}, f, default_flow_style=False, allow_unicode=True)
@@ -62,6 +59,7 @@ class WatchlistManager:
 
     def import_from_sbom(self, path: str, fmt: str | None = None) -> int:
         from depvet.watchlist.sbom import SBOMParser
+
         parser = SBOMParser()
         entries = parser.parse(path, fmt=fmt)
         for entry in entries:

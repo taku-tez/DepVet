@@ -16,8 +16,7 @@ def make_chunk(files: list[DiffFile], idx: int = 0) -> DiffChunk:
     return chunk
 
 
-def make_file(path: str, content: str = "", binary: bool = False,
-              is_new: bool = False) -> DiffFile:
+def make_file(path: str, content: str = "", binary: bool = False, is_new: bool = False) -> DiffFile:
     return DiffFile(path=path, content=content, is_binary=binary, is_new=is_new)
 
 
@@ -28,6 +27,7 @@ def mock_analyzer(triage_return=(True, "llm says analyze")):
 
 
 # ─── Phase 1: Rule engine CRITICAL → immediate, no LLM ─────────────────────
+
 
 @pytest.mark.asyncio
 async def test_phase1_critical_rule_no_llm_call():
@@ -65,6 +65,7 @@ async def test_phase1_getattr_exec_critical():
 
 # ─── Phase 2: Import diff ────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_phase2_ctypes_import_critical():
     diff = "@@ -1 +1,2 @@\n+import ctypes\n+ctypes.CDLL('libSystem.dylib')\n"
@@ -100,10 +101,12 @@ async def test_phase2_json_import_no_signal():
 
 # ─── Phase 3: Decode scan ────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_phase3_hidden_b64_payload_detected():
     """Base64 encoded malicious payload should be detected without LLM."""
     import base64 as _b64
+
     payload = "import os; os.system('id')"
     encoded = _b64.b64encode(payload.encode()).decode()
     diff = f"@@ -1 +1,3 @@\n+import base64\n+_P = '{encoded}'\n+exec(base64.b64decode(_P))\n"
@@ -117,6 +120,7 @@ async def test_phase3_hidden_b64_payload_detected():
 
 
 # ─── Phase 4: AST analysis ───────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_phase4_ast_getattr_exec_critical():
@@ -140,6 +144,7 @@ async def test_phase4_ci_evasion_detected():
 
 # ─── Benign shortcuts ────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_benign_comment_only_no_llm():
     diff = "@@ -1 +1,3 @@\n+# Updated documentation\n+# Version 2.0\n+# See CHANGELOG\n"
@@ -162,6 +167,7 @@ async def test_benign_version_bump_only():
 
 
 # ─── Multi-chunk behavior ────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_binary_in_chunk2_forces_analyze():
@@ -188,6 +194,7 @@ async def test_new_file_in_chunk2_forces_analyze():
 
 # ─── Return type contract ────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_return_always_3_tuple_on_empty():
     analyzer = mock_analyzer()
@@ -211,6 +218,7 @@ async def test_return_always_3_tuple_on_normal():
 
 
 # ─── LLM error handling ──────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_llm_error_treated_as_analyze():

@@ -30,7 +30,9 @@ def make_verdict(verdict_type=VerdictType.MALICIOUS, severity=Severity.CRITICAL)
 
 def make_release(name="requests", version="2.32.0", ecosystem="pypi", prev="2.31.0"):
     return Release(
-        name=name, version=version, ecosystem=ecosystem,
+        name=name,
+        version=version,
+        ecosystem=ecosystem,
         previous_version=prev,
         published_at="2026-01-01T00:00:00+00:00",
         url=f"https://pypi.org/project/{name}/{version}/",
@@ -39,6 +41,7 @@ def make_release(name="requests", version="2.32.0", ecosystem="pypi", prev="2.31
 
 # ─── WatchlistSyncJob ───────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_watchlist_sync_from_sbom():
     sbom_data = {
@@ -46,7 +49,7 @@ async def test_watchlist_sync_from_sbom():
         "components": [
             {"type": "library", "name": "requests", "version": "2.31.0", "purl": "pkg:pypi/requests@2.31.0"},
             {"type": "library", "name": "flask", "version": "3.0.0", "purl": "pkg:pypi/flask@3.0.0"},
-        ]
+        ],
     }
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump(sbom_data, f)
@@ -58,6 +61,7 @@ async def test_watchlist_sync_from_sbom():
 
     try:
         from depvet.watchlist.manager import WatchlistManager
+
         wl = WatchlistManager(storage_path=wl_path)
         job = WatchlistSyncJob(watchlist_manager=wl)
 
@@ -133,6 +137,7 @@ async def test_watchlist_sync_isolates_tenants_and_replaces_stale_entries():
 
 # ─── DepVetSecurifyPlugin ──────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_plugin_skips_benign():
     plugin = DepVetSecurifyPlugin()
@@ -168,8 +173,10 @@ async def test_plugin_no_affected_tenants():
 
 # ─── Maven monitor ─────────────────────────────────────────────────────────
 
+
 def test_maven_ecosystem():
     from depvet.registry.maven import MavenMonitor
+
     m = MavenMonitor()
     assert m.ecosystem == "maven"
 
@@ -177,6 +184,7 @@ def test_maven_ecosystem():
 @pytest.mark.asyncio
 async def test_maven_top_n():
     from depvet.registry.maven import MavenMonitor
+
     m = MavenMonitor()
     top = await m.load_top_n(5)
     assert len(top) == 5

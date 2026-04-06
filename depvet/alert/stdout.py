@@ -9,6 +9,7 @@ from depvet.models.verdict import Severity, VerdictType
 
 try:
     from rich.console import Console
+
     _RICH = True
 except ImportError:
     _RICH = False
@@ -31,8 +32,11 @@ SEVERITY_ICONS = {
 }
 
 SEVERITY_ORDER = {
-    Severity.CRITICAL: 5, Severity.HIGH: 4, Severity.MEDIUM: 3,
-    Severity.LOW: 2, Severity.NONE: 1,
+    Severity.CRITICAL: 5,
+    Severity.HIGH: 4,
+    Severity.MEDIUM: 3,
+    Severity.LOW: 2,
+    Severity.NONE: 1,
 }
 
 
@@ -82,18 +86,24 @@ class StdoutAlerter:
             return
 
         if self.json_mode:
-            print(json.dumps({
-                "package": event.release.name,
-                "version": event.release.version,
-                "ecosystem": event.release.ecosystem,
-                "previous_version": event.release.previous_version,
-                "verdict": event.verdict.verdict.value,
-                "severity": event.verdict.severity.value,
-                "confidence": event.verdict.confidence,
-                "findings_count": len(event.verdict.findings),
-                "summary": event.verdict.summary,
-                "url": event.release.url,
-            }, ensure_ascii=False, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "package": event.release.name,
+                        "version": event.release.version,
+                        "ecosystem": event.release.ecosystem,
+                        "previous_version": event.release.previous_version,
+                        "verdict": event.verdict.verdict.value,
+                        "severity": event.verdict.severity.value,
+                        "confidence": event.verdict.confidence,
+                        "findings_count": len(event.verdict.findings),
+                        "summary": event.verdict.summary,
+                        "url": event.release.url,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
         elif _RICH and console:
             text = format_alert_text(event)
             color = VERDICT_COLORS.get(event.verdict.verdict, "white")

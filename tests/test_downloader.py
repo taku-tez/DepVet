@@ -23,15 +23,19 @@ def make_mock_http_session(content: bytes = b"PK\x03\x04fake_zip_content"):
     async def mock_get(url, timeout=None):
         resp = MagicMock()
         resp.status = 200
-        resp.json = AsyncMock(return_value={
-            "urls": [{
-                "packagetype": "bdist_wheel",
-                "url": "https://example.com/fake-1.0-py3-none-any.whl",
-                "filename": "fake-1.0-py3-none-any.whl",
-            }],
-            "dist-tags": {"latest": "1.0.0"},
-            "versions": {"1.0.0": {"dist": {"tarball": "https://example.com/fake-1.0.0.tgz"}}},
-        })
+        resp.json = AsyncMock(
+            return_value={
+                "urls": [
+                    {
+                        "packagetype": "bdist_wheel",
+                        "url": "https://example.com/fake-1.0-py3-none-any.whl",
+                        "filename": "fake-1.0-py3-none-any.whl",
+                    }
+                ],
+                "dist-tags": {"latest": "1.0.0"},
+                "versions": {"1.0.0": {"dist": {"tarball": "https://example.com/fake-1.0.0.tgz"}}},
+            }
+        )
         resp.content.iter_chunked = AsyncMock(return_value=aiter_chunks([content]))
         yield resp
 
@@ -156,6 +160,7 @@ class TestDownloadHelpers:
 
         # Just verify the routing logic exists
         from depvet import differ
+
         dl_src = Path(differ.__file__).parent / "downloader.py"
         content = dl_src.read_text()
         for eco in supported:

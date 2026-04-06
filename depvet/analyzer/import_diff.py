@@ -24,10 +24,11 @@ from typing import Optional
 @dataclass
 class ImportSignal:
     """A suspicious newly-imported module."""
+
     module: str
-    alias: Optional[str]       # import X as Y
+    alias: Optional[str]  # import X as Y
     imported_names: list[str]  # from X import a, b, c
-    severity: str              # CRITICAL / HIGH / MEDIUM / LOW
+    severity: str  # CRITICAL / HIGH / MEDIUM / LOW
     description: str
     line_number: Optional[int] = None
 
@@ -36,67 +37,84 @@ class ImportSignal:
 
 # CRITICAL: These modules are almost exclusively used for malicious purposes
 # when added unexpectedly to a stable package
-CRITICAL_MODULES = frozenset({
-    "ctypes",       # arbitrary memory / DLL loading
-    "cffi",         # C FFI (can load arbitrary shared libraries)
-    "marshal",      # serialized bytecode (often used to hide payloads)
-    "atexit",       # delayed execution at interpreter exit
-})
+CRITICAL_MODULES = frozenset(
+    {
+        "ctypes",  # arbitrary memory / DLL loading
+        "cffi",  # C FFI (can load arbitrary shared libraries)
+        "marshal",  # serialized bytecode (often used to hide payloads)
+        "atexit",  # delayed execution at interpreter exit
+    }
+)
 
 # HIGH: Commonly used in supply chain attacks, rarely needed by most libs
-HIGH_MODULES = frozenset({
-    "subprocess",
-    "socket",
-    "base64",
-    "codecs",
-    "zlib",
-    "gzip",
-    "threading",
-    "multiprocessing",
-    "importlib",
-    "imp",
-    "pickle",
-    "shelve",
-    "xmlrpc",       # can be C2
-})
+HIGH_MODULES = frozenset(
+    {
+        "subprocess",
+        "socket",
+        "base64",
+        "codecs",
+        "zlib",
+        "gzip",
+        "threading",
+        "multiprocessing",
+        "importlib",
+        "imp",
+        "pickle",
+        "shelve",
+        "xmlrpc",  # can be C2
+    }
+)
 
 # MEDIUM: Suspicious when added without obvious reason
-MEDIUM_MODULES = frozenset({
-    "urllib",
-    "urllib.request",
-    "urllib.parse",
-    "http",
-    "http.client",
-    "requests",
-    "httpx",
-    "aiohttp",
-    "websocket",
-    "websockets",
-    "tempfile",
-    "shutil",      # can copy/delete files
-    "glob",
-    "fnmatch",
-    "ssl",         # might be for custom cert validation bypass
-})
+MEDIUM_MODULES = frozenset(
+    {
+        "urllib",
+        "urllib.request",
+        "urllib.parse",
+        "http",
+        "http.client",
+        "requests",
+        "httpx",
+        "aiohttp",
+        "websocket",
+        "websockets",
+        "tempfile",
+        "shutil",  # can copy/delete files
+        "glob",
+        "fnmatch",
+        "ssl",  # might be for custom cert validation bypass
+    }
+)
 
 # HIGH-risk names imported FROM a module (e.g., "from subprocess import Popen")
-HIGH_FROM_NAMES = frozenset({
-    "Popen", "run", "call", "check_output", "check_call",  # subprocess
-    "system", "popen", "execvp", "execvpe",                # os
-    "urlopen", "Request", "urlretrieve",                   # urllib
-    "b64decode", "b64encode", "decodebytes",               # base64
-    "exec_module", "import_module",                        # importlib
-    "exec_", "execute",                                    # generic
-})
+HIGH_FROM_NAMES = frozenset(
+    {
+        "Popen",
+        "run",
+        "call",
+        "check_output",
+        "check_call",  # subprocess
+        "system",
+        "popen",
+        "execvp",
+        "execvpe",  # os
+        "urlopen",
+        "Request",
+        "urlretrieve",  # urllib
+        "b64decode",
+        "b64encode",
+        "decodebytes",  # base64
+        "exec_module",
+        "import_module",  # importlib
+        "exec_",
+        "execute",  # generic
+    }
+)
 
 # ─── Import parsing ───────────────────────────────────────────────────────────
 
-_IMPORT_RE = re.compile(
-    r"^\s*import\s+([\w.,\s]+?)(?:\s+as\s+(\w+))?\s*$"
-)
-_FROM_IMPORT_RE = re.compile(
-    r"^\s*from\s+([\w.]+)\s+import\s+(.+)"
-)
+_IMPORT_RE = re.compile(r"^\s*import\s+([\w.,\s]+?)(?:\s+as\s+(\w+))?\s*$")
+_FROM_IMPORT_RE = re.compile(r"^\s*from\s+([\w.]+)\s+import\s+(.+)")
 
 
 def _parse_import_line(line: str) -> Optional[tuple[str, Optional[str], list[str]]]:
@@ -160,6 +178,7 @@ def _module_severity(module: str, imported_names: list[str]) -> Optional[tuple[s
 
 # ─── Main function ────────────────────────────────────────────────────────────
 
+
 def analyze_imports(diff_content: str) -> list[ImportSignal]:
     """
     Analyze import statements in diff added lines.
@@ -196,14 +215,16 @@ def analyze_imports(diff_content: str) -> list[ImportSignal]:
                         result = _module_severity(mod, [])
                         if result:
                             sev, desc = result
-                            signals.append(ImportSignal(
-                                module=mod,
-                                alias=None,
-                                imported_names=[],
-                                severity=sev,
-                                description=desc,
-                                line_number=current_line,
-                            ))
+                            signals.append(
+                                ImportSignal(
+                                    module=mod,
+                                    alias=None,
+                                    imported_names=[],
+                                    severity=sev,
+                                    description=desc,
+                                    line_number=current_line,
+                                )
+                            )
                             seen_modules.add(mod)
                 continue
 
@@ -214,14 +235,16 @@ def analyze_imports(diff_content: str) -> list[ImportSignal]:
             result = _module_severity(module, imported_names)
             if result:
                 sev, desc = result
-                signals.append(ImportSignal(
-                    module=module,
-                    alias=alias,
-                    imported_names=imported_names,
-                    severity=sev,
-                    description=desc,
-                    line_number=current_line,
-                ))
+                signals.append(
+                    ImportSignal(
+                        module=module,
+                        alias=alias,
+                        imported_names=imported_names,
+                        severity=sev,
+                        description=desc,
+                        line_number=current_line,
+                    )
+                )
 
     return signals
 

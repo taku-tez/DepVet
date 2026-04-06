@@ -13,10 +13,28 @@ from depvet.models.verdict import DiffStats
 logger = logging.getLogger(__name__)
 
 BINARY_EXTENSIONS = {
-    ".pyc", ".pyo", ".so", ".dll", ".exe", ".bin", ".dat",
-    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg",
-    ".woff", ".woff2", ".ttf", ".eot",
-    ".zip", ".tar", ".gz", ".tgz", ".whl",
+    ".pyc",
+    ".pyo",
+    ".so",
+    ".dll",
+    ".exe",
+    ".bin",
+    ".dat",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".ico",
+    ".svg",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".eot",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".tgz",
+    ".whl",
 }
 
 
@@ -41,7 +59,7 @@ def _read_lines(path: Path) -> list[str]:
 
 def _collect_files(base_dir: Path) -> dict[str, Path]:
     """Return {relative_path: absolute_path} for all files under base_dir."""
-    result = {}
+    result: dict[str, Path] = {}
     if not base_dir.exists():
         return result
     for p in base_dir.rglob("*"):
@@ -91,26 +109,30 @@ def generate_diff(
         check_path = new_path or old_path
         if _is_binary_file(check_path):  # type: ignore[arg-type]
             stats.binary_files.append(rel_path)
-            diff_files.append(DiffFile(
-                path=rel_path,
-                content="",
-                is_binary=True,
-                is_new=is_new,
-                is_deleted=is_deleted,
-            ))
+            diff_files.append(
+                DiffFile(
+                    path=rel_path,
+                    content="",
+                    is_binary=True,
+                    is_new=is_new,
+                    is_deleted=is_deleted,
+                )
+            )
             stats.files_changed += 1
             continue
 
         old_lines = _read_lines(old_path) if old_path else []
         new_lines = _read_lines(new_path) if new_path else []
 
-        diff_lines = list(difflib.unified_diff(
-            old_lines,
-            new_lines,
-            fromfile=f"a/{rel_path}",
-            tofile=f"b/{rel_path}",
-            lineterm="",
-        ))
+        diff_lines = list(
+            difflib.unified_diff(
+                old_lines,
+                new_lines,
+                fromfile=f"a/{rel_path}",
+                tofile=f"b/{rel_path}",
+                lineterm="",
+            )
+        )
 
         if not diff_lines and not is_new and not is_deleted:
             continue
@@ -122,13 +144,15 @@ def generate_diff(
         if diff_lines or is_new or is_deleted:
             stats.files_changed += 1
 
-        diff_files.append(DiffFile(
-            path=rel_path,
-            content="\n".join(diff_lines),
-            is_binary=False,
-            is_new=is_new,
-            is_deleted=is_deleted,
-        ))
+        diff_files.append(
+            DiffFile(
+                path=rel_path,
+                content="\n".join(diff_lines),
+                is_binary=False,
+                is_new=is_new,
+                is_deleted=is_deleted,
+            )
+        )
 
     if chunker is None:
         chunker = DiffChunker(max_tokens=max_chunk_tokens)
@@ -150,7 +174,7 @@ def format_diff_markdown(chunks: list[DiffChunk], stats: DiffStats) -> str:
         "",
     ]
     for i, chunk in enumerate(chunks):
-        lines.append(f"## Chunk {i+1}/{len(chunks)}")
+        lines.append(f"## Chunk {i + 1}/{len(chunks)}")
         lines.append("```diff")
         lines.append(chunk.content)
         lines.append("```")

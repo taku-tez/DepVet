@@ -11,6 +11,7 @@ from depvet.analyzer.dep_extractor import (
 
 # ─── Go / go.mod ─────────────────────────────────────────────────────────────
 
+
 class TestGoModExtractor:
     def test_require_block_single(self):
         diff = "+\tgithub.com/stretchr/testify v1.8.4\n"
@@ -78,13 +79,10 @@ class TestGoModExtractor:
 
 # ─── Cargo / Cargo.toml ──────────────────────────────────────────────────────
 
+
 class TestCargoTomlExtractor:
     def test_simple_dep(self):
-        diff = (
-            "--- a/Cargo.toml\n+++ b/Cargo.toml\n@@ -1 +1,3 @@\n"
-            "+[dependencies]\n"
-            '+serde = "1.0"\n'
-        )
+        diff = '--- a/Cargo.toml\n+++ b/Cargo.toml\n@@ -1 +1,3 @@\n+[dependencies]\n+serde = "1.0"\n'
         deps = _extract_cargo_deps(diff)
         assert len(deps) == 1
         assert deps[0].name == "serde"
@@ -92,50 +90,42 @@ class TestCargoTomlExtractor:
         assert deps[0].ecosystem == "cargo"
 
     def test_table_dep_with_features(self):
-        diff = (
-            "+[dependencies]\n"
-            '+tokio = { version = "1.28", features = ["full"] }\n'
-        )
+        diff = '+[dependencies]\n+tokio = { version = "1.28", features = ["full"] }\n'
         deps = _extract_cargo_deps(diff)
         assert len(deps) == 1
         assert deps[0].name == "tokio"
         assert deps[0].version_spec == "1.28"
 
     def test_dev_dependencies(self):
-        diff = "+[dev-dependencies]\n" '+mockall = "0.11"\n'
+        diff = '+[dev-dependencies]\n+mockall = "0.11"\n'
         deps = _extract_cargo_deps(diff)
         assert len(deps) == 1
         assert deps[0].is_dev is True
 
     def test_build_dependencies_flagged_dev(self):
-        diff = "+[build-dependencies]\n" '+cc = "1.0"\n'
+        diff = '+[build-dependencies]\n+cc = "1.0"\n'
         deps = _extract_cargo_deps(diff)
         assert len(deps) == 1
         assert deps[0].is_dev is True
 
     def test_regular_deps_not_dev(self):
-        diff = "+[dependencies]\n" '+reqwest = "0.11"\n'
+        diff = '+[dependencies]\n+reqwest = "0.11"\n'
         deps = _extract_cargo_deps(diff)
         assert deps[0].is_dev is False
 
     def test_skips_metadata_keys(self):
         """name, version, edition should not be extracted as deps."""
-        diff = "+[package]\n" '+name = "my-crate"\n' '+version = "0.1.0"\n' '+edition = "2021"\n'
+        diff = '+[package]\n+name = "my-crate"\n+version = "0.1.0"\n+edition = "2021"\n'
         deps = _extract_cargo_deps(diff)
         assert len(deps) == 0
 
     def test_outside_dep_section_ignored(self):
-        diff = "+[package]\n" '+serde = "1.0"\n'
+        diff = '+[package]\n+serde = "1.0"\n'
         deps = _extract_cargo_deps(diff)
         assert len(deps) == 0
 
     def test_multiple_deps(self):
-        diff = (
-            "+[dependencies]\n"
-            '+serde = "1.0"\n'
-            '+serde_json = "1.0"\n'
-            '+tokio = { version = "1.28" }\n'
-        )
+        diff = '+[dependencies]\n+serde = "1.0"\n+serde_json = "1.0"\n+tokio = { version = "1.28" }\n'
         deps = _extract_cargo_deps(diff)
         assert len(deps) == 3
         names = [d.name for d in deps]
@@ -144,13 +134,14 @@ class TestCargoTomlExtractor:
         assert "tokio" in names
 
     def test_removed_lines_ignored(self):
-        diff = "+[dependencies]\n" '-old-crate = "0.1"\n' '+new-crate = "0.2"\n'
+        diff = '+[dependencies]\n-old-crate = "0.1"\n+new-crate = "0.2"\n'
         deps = _extract_cargo_deps(diff)
         assert len(deps) == 1
         assert deps[0].name == "new-crate"
 
 
 # ─── Unified extractor routing ───────────────────────────────────────────────
+
 
 class TestUnifiedExtractorRouting:
     def test_routes_to_go_for_go_mod(self):
@@ -166,7 +157,7 @@ class TestUnifiedExtractorRouting:
         assert all(d.ecosystem == "go" for d in deps)
 
     def test_routes_to_cargo_for_cargo_toml(self):
-        diff = "+[dependencies]\n" '+serde = "1.0"\n'
+        diff = '+[dependencies]\n+serde = "1.0"\n'
         deps = extract_new_dependencies(diff, "Cargo.toml")
         assert len(deps) == 1
         assert deps[0].ecosystem == "cargo"

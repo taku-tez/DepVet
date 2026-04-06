@@ -19,10 +19,10 @@ class KnownBadEntry:
     name: str
     version: str
     ecosystem: str
-    verdict: str          # MALICIOUS | SUSPICIOUS
+    verdict: str  # MALICIOUS | SUSPICIOUS
     severity: str
     summary: str
-    source: str           # "manual" | "osv" | "depvet"
+    source: str  # "manual" | "osv" | "depvet"
     reported_at: str
     cve: Optional[str] = None
     osv_id: Optional[str] = None

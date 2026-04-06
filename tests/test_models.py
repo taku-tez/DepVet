@@ -1,8 +1,6 @@
 """Tests for data models."""
 
-from depvet.models.verdict import (
-    VerdictType, Severity, FindingCategory, Finding, DiffStats, Verdict
-)
+from depvet.models.verdict import VerdictType, Severity, FindingCategory, Finding, DiffStats, Verdict
 from depvet.models.package import Release
 from depvet.models.alert import AlertEvent
 

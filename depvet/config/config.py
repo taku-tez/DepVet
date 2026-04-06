@@ -61,7 +61,7 @@ class MonitorConfig(BaseSettings):
 
 
 class WatchlistConfig(BaseSettings):
-    sources: list[str] = Field(default_factory=lambda: ["top_n"])
+    sources: list[str] = Field(default_factory=lambda: ["explicit", "top_n"])
     sbom_path: Optional[str] = None
     sbom_format: str = "cyclonedx"
     top_n_pypi: int = DEFAULT_TOP_N_PYPI
@@ -85,6 +85,7 @@ class AlertConfig(BaseSettings):
     slack_webhook_env: str = "DEPVET_SLACK_WEBHOOK"
     webhook_url: str = ""
     webhook_secret_env: str = "DEPVET_WEBHOOK_SECRET"
+    dlq_path: str = ".depvet_dlq.yaml"
 
     model_config = {"env_prefix": "DEPVET_ALERT_", "extra": "ignore"}
 
@@ -138,11 +139,13 @@ def load_config(config_path: Optional[str] = None) -> DepVetConfig:
     paths_to_try = []
     if config_path:
         paths_to_try.append(Path(config_path))
-    paths_to_try.extend([
-        Path("depvet.toml"),
-        Path.home() / ".config" / "depvet" / "depvet.toml",
-        Path("/etc/depvet/depvet.toml"),
-    ])
+    paths_to_try.extend(
+        [
+            Path("depvet.toml"),
+            Path.home() / ".config" / "depvet" / "depvet.toml",
+            Path("/etc/depvet/depvet.toml"),
+        ]
+    )
 
     raw: dict = {}
     for path in paths_to_try:

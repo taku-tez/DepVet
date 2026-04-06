@@ -11,6 +11,7 @@ def checker():
 
 # ─── Severity mapping ────────────────────────────────────────────────────────
 
+
 def test_severity_critical_cvss_10(checker):
     vuln = {"severity": [{"type": "CVSS_V3", "score": "10.0"}], "id": "CVE-2023-001"}
     assert checker._map_severity(vuln) == "CRITICAL"
@@ -55,6 +56,7 @@ def test_severity_no_severity_field_default_medium(checker):
 
 
 # ─── Ecosystem mapping ───────────────────────────────────────────────────────
+
 
 def test_ecosystem_map_pypi(checker):
     assert checker._map_ecosystem("pypi") == "PyPI"

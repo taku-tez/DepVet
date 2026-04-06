@@ -11,7 +11,12 @@ from depvet.alert.webhook import WebhookAlerter, _event_to_dict
 from depvet.models.alert import AlertEvent
 from depvet.models.package import Release
 from depvet.models.verdict import (
-    DiffStats, Finding, FindingCategory, Severity, Verdict, VerdictType,
+    DiffStats,
+    Finding,
+    FindingCategory,
+    Severity,
+    Verdict,
+    VerdictType,
 )
 
 
@@ -23,7 +28,9 @@ def make_verdict(
     summary="テストサマリー",
 ):
     return Verdict(
-        verdict=verdict, severity=severity, confidence=confidence,
+        verdict=verdict,
+        severity=severity,
+        confidence=confidence,
         findings=findings or [],
         summary=summary,
         analysis_duration_ms=100,
@@ -37,7 +44,9 @@ def make_verdict(
 
 def make_release(name="requests", version="2.32.0", ecosystem="pypi"):
     return Release(
-        name=name, version=version, ecosystem=ecosystem,
+        name=name,
+        version=version,
+        ecosystem=ecosystem,
         previous_version="2.31.0",
         published_at="2026-04-02T00:00:00+00:00",
         url=f"https://pypi.org/project/{name}/{version}/",
@@ -51,8 +60,7 @@ def make_event(**kw):
     )
 
 
-def make_finding(cat=FindingCategory.EXFILTRATION, sev=Severity.CRITICAL,
-                 file="auth.py", line=10):
+def make_finding(cat=FindingCategory.EXFILTRATION, sev=Severity.CRITICAL, file="auth.py", line=10):
     return Finding(
         category=cat,
         description="テスト検出内容",
@@ -66,6 +74,7 @@ def make_finding(cat=FindingCategory.EXFILTRATION, sev=Severity.CRITICAL,
 
 
 # ─── AlertRouter ─────────────────────────────────────────────────────────────
+
 
 class TestAlertRouter:
     def test_register_multiple(self):
@@ -137,6 +146,7 @@ class TestAlertRouter:
 
 # ─── StdoutAlerter ───────────────────────────────────────────────────────────
 
+
 class TestStdoutAlerter:
     @pytest.mark.asyncio
     async def test_json_output_structure(self, capsys):
@@ -194,6 +204,7 @@ class TestStdoutAlerter:
 
 # ─── SlackAlerter ────────────────────────────────────────────────────────────
 
+
 class TestSlackAlerter:
     @pytest.mark.asyncio
     async def test_no_url_does_nothing(self):
@@ -207,14 +218,26 @@ class TestSlackAlerter:
 
         class MockResponse:
             status = 200
-            async def __aenter__(self): return self
-            async def __aexit__(self, *a): pass
+            headers = {}
+
+            def release(self):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                pass
 
         class MockSession:
-            async def __aenter__(self): return self
-            async def __aexit__(self, *a): pass
-            def post(self, url, json=None, timeout=None):
-                posted.append({"url": url, "payload": json})
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                pass
+
+            async def request(self, method, url, **kwargs):
+                posted.append({"url": url, "payload": kwargs.get("json")})
                 return MockResponse()
 
         with patch("depvet.alert.slack.aiohttp.ClientSession", return_value=MockSession()):
@@ -232,14 +255,26 @@ class TestSlackAlerter:
 
         class MockResponse:
             status = 200
-            async def __aenter__(self): return self
-            async def __aexit__(self, *a): pass
+            headers = {}
+
+            def release(self):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                pass
 
         class MockSession:
-            async def __aenter__(self): return self
-            async def __aexit__(self, *a): pass
-            def post(self, url, json=None, timeout=None):
-                posted.append(json)
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                pass
+
+            async def request(self, method, url, **kwargs):
+                posted.append(kwargs.get("json"))
                 return MockResponse()
 
         with patch("depvet.alert.slack.aiohttp.ClientSession", return_value=MockSession()):
@@ -252,6 +287,7 @@ class TestSlackAlerter:
 
 
 # ─── WebhookAlerter ──────────────────────────────────────────────────────────
+
 
 class TestWebhookAlerter:
     def test_event_to_dict_structure(self):
@@ -283,17 +319,30 @@ class TestWebhookAlerter:
 
         class MockResponse:
             status = 200
-            async def __aenter__(self): return self
-            async def __aexit__(self, *a): pass
+            headers = {}
+
+            def release(self):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                pass
 
         class MockSession:
-            async def __aenter__(self): return self
-            async def __aexit__(self, *a): pass
-            def post(self, url, data=None, headers=None, timeout=None):
-                posted_headers.update(headers or {})
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                pass
+
+            async def request(self, method, url, **kwargs):
+                posted_headers.update(kwargs.get("headers") or {})
                 return MockResponse()
 
         import os
+
         with patch.dict(os.environ, {"DEPVET_WEBHOOK_SECRET": secret}):
             with patch("depvet.alert.webhook.aiohttp.ClientSession", return_value=MockSession()):
                 alerter = WebhookAlerter(url="https://example.com/hook")
@@ -309,17 +358,30 @@ class TestWebhookAlerter:
 
         class MockResponse:
             status = 200
-            async def __aenter__(self): return self
-            async def __aexit__(self, *a): pass
+            headers = {}
+
+            def release(self):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                pass
 
         class MockSession:
-            async def __aenter__(self): return self
-            async def __aexit__(self, *a): pass
-            def post(self, url, data=None, headers=None, timeout=None):
-                posted_headers.update(headers or {})
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                pass
+
+            async def request(self, method, url, **kwargs):
+                posted_headers.update(kwargs.get("headers") or {})
                 return MockResponse()
 
         import os
+
         env = {k: v for k, v in os.environ.items() if k != "DEPVET_WEBHOOK_SECRET"}
         with patch.dict(os.environ, env, clear=True):
             with patch("depvet.alert.webhook.aiohttp.ClientSession", return_value=MockSession()):

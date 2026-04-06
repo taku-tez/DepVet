@@ -123,6 +123,6 @@ def _unpack_tarball(archive_path: Path, dest_dir: Path) -> Path:
         if "filter" in signature(tf.extractall).parameters:
             tf.extractall(out, members=members, filter="data")
         else:
-            tf.extractall(out, members=members)
+            tf.extractall(out, members=members)  # nosec B202 — members validated above
 
     return out

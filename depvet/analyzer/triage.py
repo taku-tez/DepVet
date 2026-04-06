@@ -68,16 +68,18 @@ class TriageAnalyzer:
                         # Convert import signals to RuleMatch-like objects
                         for sig in import_signals:
                             if sig.severity in ("CRITICAL", "HIGH"):
-                                all_rule_matches.append(RuleMatch(
-                                    rule_id=f"IMPORT_{sig.module.upper().replace('.', '_')}",
-                                    category=FindingCategory.EXECUTION,
-                                    severity=Severity(sig.severity),
-                                    description=sig.description,
-                                    evidence=f"import {sig.module}",
-                                    file=f.path,
-                                    line_number=sig.line_number,
-                                    cwe="CWE-913",
-                                ))
+                                all_rule_matches.append(
+                                    RuleMatch(
+                                        rule_id=f"IMPORT_{sig.module.upper().replace('.', '_')}",
+                                        category=FindingCategory.EXECUTION,
+                                        severity=Severity(sig.severity),
+                                        description=sig.description,
+                                        evidence=f"import {sig.module}",
+                                        file=f.path,
+                                        line_number=sig.line_number,
+                                        cwe="CWE-913",
+                                    )
+                                )
                         if any(s.severity == "CRITICAL" for s in import_signals):
                             return True, f"新規危険インポート検出: {import_signals[0].module}", all_rule_matches
 
@@ -92,21 +94,28 @@ class TriageAnalyzer:
                         if new_deps:
                             # Check against Known-bad DB
                             from depvet.known_bad.database import KnownBadDB
+
                             db = KnownBadDB()
                             for dep in new_deps:
                                 hit = db.lookup(dep.name, dep.version_spec.lstrip("^~>=<"), dep.ecosystem)
                                 if hit:
-                                    all_rule_matches.append(RuleMatch(
-                                        rule_id="KNOWN_BAD_DEP_INJECTED",
-                                        category=FindingCategory.DEPENDENCY_CONFUSION,
-                                        severity=Severity.CRITICAL,
-                                        description=f"既知の悪意あるパッケージ '{dep.name}@{dep.version_spec}' が依存として追加された: {hit.summary}",
-                                        evidence=f"{dep.name}: {dep.version_spec}",
-                                        file=f.path,
-                                        line_number=dep.line_number,
-                                        cwe="CWE-829",
-                                    ))
-                                    return True, f"Known-bad依存追加検出: {dep.name}@{dep.version_spec}", all_rule_matches
+                                    all_rule_matches.append(
+                                        RuleMatch(
+                                            rule_id="KNOWN_BAD_DEP_INJECTED",
+                                            category=FindingCategory.DEPENDENCY_CONFUSION,
+                                            severity=Severity.CRITICAL,
+                                            description=f"既知の悪意あるパッケージ '{dep.name}@{dep.version_spec}' が依存として追加された: {hit.summary}",
+                                            evidence=f"{dep.name}: {dep.version_spec}",
+                                            file=f.path,
+                                            line_number=dep.line_number,
+                                            cwe="CWE-829",
+                                        )
+                                    )
+                                    return (
+                                        True,
+                                        f"Known-bad依存追加検出: {dep.name}@{dep.version_spec}",
+                                        all_rule_matches,
+                                    )
 
                             # ── Reputation check for each new dependency ──
                             unknown_deps = deps_to_watchlist_entries(new_deps)
@@ -116,41 +125,52 @@ class TriageAnalyzer:
                                         rep = await evaluate_dep_reputation(dep_name, dep_eco, "")
                                         if rep.severity in ("CRITICAL", "HIGH"):
                                             sev_val = Severity(rep.severity)
-                                            all_rule_matches.append(RuleMatch(
-                                                rule_id="SUSPICIOUS_NEW_DEP_REPUTATION",
-                                                category=FindingCategory.DEPENDENCY_CONFUSION,
-                                                severity=sev_val,
-                                                description=rep.description or f"新規依存パッケージ '{dep_name}' の信頼性が低い: {', '.join(rep.signals[:2])}",
-                                                evidence=f"{dep_name}: age={rep.age_days}d dl={rep.weekly_downloads}",
-                                                file=f.path,
-                                                line_number=None,
-                                                cwe="CWE-1021",
-                                            ))
+                                            all_rule_matches.append(
+                                                RuleMatch(
+                                                    rule_id="SUSPICIOUS_NEW_DEP_REPUTATION",
+                                                    category=FindingCategory.DEPENDENCY_CONFUSION,
+                                                    severity=sev_val,
+                                                    description=rep.description
+                                                    or f"新規依存パッケージ '{dep_name}' の信頼性が低い: {', '.join(rep.signals[:2])}",
+                                                    evidence=f"{dep_name}: age={rep.age_days}d dl={rep.weekly_downloads}",
+                                                    file=f.path,
+                                                    line_number=None,
+                                                    cwe="CWE-1021",
+                                                )
+                                            )
                                             if rep.severity == "CRITICAL":
-                                                return True, f"信頼性不明の新規依存検出: {dep_name}（公開{rep.age_days}日、DL:{rep.weekly_downloads}）", all_rule_matches
+                                                return (
+                                                    True,
+                                                    f"信頼性不明の新規依存検出: {dep_name}（公開{rep.age_days}日、DL:{rep.weekly_downloads}）",
+                                                    all_rule_matches,
+                                                )
                                         elif rep.severity == "MEDIUM":
-                                            all_rule_matches.append(RuleMatch(
+                                            all_rule_matches.append(
+                                                RuleMatch(
+                                                    rule_id="UNKNOWN_DEP_ADDED",
+                                                    category=FindingCategory.DEPENDENCY_CONFUSION,
+                                                    severity=Severity.MEDIUM,
+                                                    description=f"新規依存パッケージ '{dep_name}' が追加された（信頼性要確認）",
+                                                    evidence=f"new dep: {dep_name}",
+                                                    file=f.path,
+                                                    line_number=None,
+                                                    cwe="CWE-1021",
+                                                )
+                                            )
+                                    except Exception as rep_err:
+                                        logger.debug(f"Reputation check failed for {dep_name}: {rep_err}")
+                                        all_rule_matches.append(
+                                            RuleMatch(
                                                 rule_id="UNKNOWN_DEP_ADDED",
                                                 category=FindingCategory.DEPENDENCY_CONFUSION,
                                                 severity=Severity.MEDIUM,
-                                                description=f"新規依存パッケージ '{dep_name}' が追加された（信頼性要確認）",
+                                                description=f"未知の依存パッケージ '{dep_name}' が追加された（信頼性確認失敗）",
                                                 evidence=f"new dep: {dep_name}",
                                                 file=f.path,
                                                 line_number=None,
                                                 cwe="CWE-1021",
-                                            ))
-                                    except Exception as rep_err:
-                                        logger.debug(f"Reputation check failed for {dep_name}: {rep_err}")
-                                        all_rule_matches.append(RuleMatch(
-                                            rule_id="UNKNOWN_DEP_ADDED",
-                                            category=FindingCategory.DEPENDENCY_CONFUSION,
-                                            severity=Severity.MEDIUM,
-                                            description=f"未知の依存パッケージ '{dep_name}' が追加された（信頼性確認失敗）",
-                                            evidence=f"new dep: {dep_name}",
-                                            file=f.path,
-                                            line_number=None,
-                                            cwe="CWE-1021",
-                                        ))
+                                            )
+                                        )
 
         # ── Phase 3: Base64/hex decode scan ────────────────────────────────
         for chunk in chunks:
@@ -161,16 +181,18 @@ class TriageAnalyzer:
                         critical_decoded = [d for d in decoded_hits if d.severity == Severity.CRITICAL]
                         if critical_decoded:
                             for d in critical_decoded:
-                                all_rule_matches.append(RuleMatch(
-                                    rule_id="DECODED_PAYLOAD_CRITICAL",
-                                    category=d.category,
-                                    severity=d.severity,
-                                    description=d.description,
-                                    evidence=d.original_encoded,
-                                    file=d.file,
-                                    line_number=d.line_number,
-                                    cwe=d.cwe,
-                                ))
+                                all_rule_matches.append(
+                                    RuleMatch(
+                                        rule_id="DECODED_PAYLOAD_CRITICAL",
+                                        category=d.category,
+                                        severity=d.severity,
+                                        description=d.description,
+                                        evidence=d.original_encoded,
+                                        file=d.file,
+                                        line_number=d.line_number,
+                                        cwe=d.cwe,
+                                    )
+                                )
                             return True, f"エンコードされたペイロード検出({decoded_hits[0].encoding})", all_rule_matches
 
         # ── Phase 4: AST analysis ───────────────────────────────────────────
@@ -181,22 +203,22 @@ class TriageAnalyzer:
                     critical_ast = [a for a in ast_findings if a.severity.value == "CRITICAL"]
                     if critical_ast:
                         for a in critical_ast:
-                            all_rule_matches.append(RuleMatch(
-                                rule_id=a.finding_id,
-                                category=a.category,
-                                severity=a.severity,
-                                description=a.description,
-                                evidence=a.evidence,
-                                file=f.path,
-                                line_number=a.line_number,
-                                cwe=a.cwe,
-                            ))
+                            all_rule_matches.append(
+                                RuleMatch(
+                                    rule_id=a.finding_id,
+                                    category=a.category,
+                                    severity=a.severity,
+                                    description=a.description,
+                                    evidence=a.evidence,
+                                    file=f.path,
+                                    line_number=a.line_number,
+                                    cwe=a.cwe,
+                                )
+                            )
                         return True, f"AST解析(CRITICAL): {critical_ast[0].description}", all_rule_matches
 
         # ── Check if likely benign (skip LLM) ──────────────────────────────
-        all_content = " ".join(
-            f.content for chunk in chunks for f in chunk.files if not f.is_binary
-        )
+        all_content = " ".join(f.content for chunk in chunks for f in chunk.files if not f.is_binary)
         if is_likely_benign(all_content) and not all_rule_matches:
             return False, "コメント/ドキュメント変更のみ（静的解析判定）", []
 
@@ -207,9 +229,7 @@ class TriageAnalyzer:
 
         # ── Phase 5: LLM triage as final arbiter ───────────────────────────
         try:
-            should, reason = await self.analyzer.triage(
-                chunks[0], package_name, old_version, new_version
-            )
+            should, reason = await self.analyzer.triage(chunks[0], package_name, old_version, new_version)
         except Exception as e:
             logger.warning(f"LLM triage failed, defaulting to analyze: {e}")
             return True, f"LLM triage error (fail-safe): {e}", all_rule_matches

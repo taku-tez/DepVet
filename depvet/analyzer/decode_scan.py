@@ -29,9 +29,10 @@ from depvet.models.verdict import FindingCategory, Severity
 @dataclass
 class DecodedPayload:
     """A successfully decoded suspicious payload."""
-    original_encoded: str       # the encoded string (truncated)
-    decoded_text: str           # the decoded content
-    encoding: str               # "base64" | "hex" | "rot13" | "unicode_escape"
+
+    original_encoded: str  # the encoded string (truncated)
+    decoded_text: str  # the decoded content
+    encoding: str  # "base64" | "hex" | "rot13" | "unicode_escape"
     file: str
     line_number: Optional[int]
     severity: Severity
@@ -57,7 +58,7 @@ SUSPICIOUS_DECODED_KEYWORDS = [
     r"subprocess\.",
     r"urllib\.request\.",
     r"socket\.",
-    r"base64\.b64decode\s*\(",   # double-encoded
+    r"base64\.b64decode\s*\(",  # double-encoded
     r"/bin/bash",
     r"/bin/sh",
     r"curl\s+http",
@@ -79,14 +80,10 @@ _SUSPICIOUS_RE = re.compile(
 
 # Regex to find base64 strings in code
 # Looks for: = "...", = b"...", = '...' with base64-like content
-_B64_STRING_RE = re.compile(
-    r"""[=(\s,]\s*[bB]?["']([A-Za-z0-9+/]{20,}={0,2})["']"""
-)
+_B64_STRING_RE = re.compile(r"""[=(\s,]\s*[bB]?["']([A-Za-z0-9+/]{20,}={0,2})["']""")
 
 # Regex to find hex strings
-_HEX_STRING_RE = re.compile(
-    r"""[=(\s,]\s*[bB]?["']([0-9a-fA-F]{16,})["']"""
-)
+_HEX_STRING_RE = re.compile(r"""[=(\s,]\s*[bB]?["']([0-9a-fA-F]{16,})["']""")
 
 
 def _try_decode_b64(s: str) -> Optional[str]:
@@ -124,6 +121,7 @@ def _try_decode_hex(s: str) -> Optional[str]:
 def _try_decode_rot13(s: str) -> Optional[str]:
     """Try ROT13 decode (used in some obfuscation)."""
     import codecs
+
     decoded = codecs.decode(s, "rot_13")
     if _SUSPICIOUS_RE.search(decoded):
         return decoded
@@ -134,7 +132,7 @@ def _scan_decoded_content(text: str) -> list[str]:
     """Find suspicious patterns in decoded text. Returns list of descriptions."""
     hits = []
     for m in _SUSPICIOUS_RE.finditer(text):
-        snippet = text[max(0, m.start()-10):m.end()+20].strip()
+        snippet = text[max(0, m.start() - 10) : m.end() + 20].strip()
         hits.append(snippet[:60])
     return list(dict.fromkeys(hits))  # deduplicate preserving order
 
@@ -164,7 +162,6 @@ def decode_and_scan(diff_content: str, filepath: str = "") -> list[DecodedPayloa
     seen_encoded: set[str] = set()
 
     for line_num, line in added_lines:
-
         # ── Try base64 ──────────────────────────────────────────────────────
         for m in _B64_STRING_RE.finditer(line):
             candidate = m.group(1)
@@ -177,21 +174,25 @@ def decode_and_scan(diff_content: str, filepath: str = "") -> list[DecodedPayloa
             if decoded and _SUSPICIOUS_RE.search(decoded):
                 seen_encoded.add(candidate)
                 sub = _scan_decoded_content(decoded)
-                sev = Severity.CRITICAL if any(
-                    kw in decoded.lower() for kw in ("exec", "eval", "system", "/bin/", "curl ", "wget ")
-                ) else Severity.HIGH
+                sev = (
+                    Severity.CRITICAL
+                    if any(kw in decoded.lower() for kw in ("exec", "eval", "system", "/bin/", "curl ", "wget "))
+                    else Severity.HIGH
+                )
 
-                results.append(DecodedPayload(
-                    original_encoded=candidate[:50] + ("..." if len(candidate) > 50 else ""),
-                    decoded_text=decoded[:200],
-                    encoding="base64",
-                    file=filepath,
-                    line_number=line_num,
-                    severity=sev,
-                    description=f"base64文字列をデコードすると悪意あるコードが含まれていた: {decoded[:80]!r}",
-                    category=FindingCategory.OBFUSCATION,
-                    sub_findings=sub,
-                ))
+                results.append(
+                    DecodedPayload(
+                        original_encoded=candidate[:50] + ("..." if len(candidate) > 50 else ""),
+                        decoded_text=decoded[:200],
+                        encoding="base64",
+                        file=filepath,
+                        line_number=line_num,
+                        severity=sev,
+                        description=f"base64文字列をデコードすると悪意あるコードが含まれていた: {decoded[:80]!r}",
+                        category=FindingCategory.OBFUSCATION,
+                        sub_findings=sub,
+                    )
+                )
 
         # ── Try hex ─────────────────────────────────────────────────────────
         for m in _HEX_STRING_RE.finditer(line):
@@ -209,37 +210,43 @@ def decode_and_scan(diff_content: str, filepath: str = "") -> list[DecodedPayloa
             if decoded and _SUSPICIOUS_RE.search(decoded):
                 seen_encoded.add(candidate)
                 sub = _scan_decoded_content(decoded)
-                sev = Severity.CRITICAL if any(
-                    kw in decoded.lower() for kw in ("exec", "eval", "system", "bash", "cmd")
-                ) else Severity.HIGH
+                sev = (
+                    Severity.CRITICAL
+                    if any(kw in decoded.lower() for kw in ("exec", "eval", "system", "bash", "cmd"))
+                    else Severity.HIGH
+                )
 
-                results.append(DecodedPayload(
-                    original_encoded=candidate[:50],
-                    decoded_text=decoded[:200],
-                    encoding="hex",
-                    file=filepath,
-                    line_number=line_num,
-                    severity=sev,
-                    description=f"hex文字列をデコードすると悪意あるコードが含まれていた: {decoded[:80]!r}",
-                    category=FindingCategory.OBFUSCATION,
-                    sub_findings=sub,
-                ))
+                results.append(
+                    DecodedPayload(
+                        original_encoded=candidate[:50],
+                        decoded_text=decoded[:200],
+                        encoding="hex",
+                        file=filepath,
+                        line_number=line_num,
+                        severity=sev,
+                        description=f"hex文字列をデコードすると悪意あるコードが含まれていた: {decoded[:80]!r}",
+                        category=FindingCategory.OBFUSCATION,
+                        sub_findings=sub,
+                    )
+                )
 
         # ── Try ROT13 on the full line ───────────────────────────────────────
         if len(line) > 10:
             rot13 = _try_decode_rot13(line)
             if rot13:
                 sub = _scan_decoded_content(rot13)
-                results.append(DecodedPayload(
-                    original_encoded=line[:50],
-                    decoded_text=rot13[:200],
-                    encoding="rot13",
-                    file=filepath,
-                    line_number=line_num,
-                    severity=Severity.HIGH,
-                    description="ROT13エンコードされた行に悪意あるパターンが検出された",
-                    category=FindingCategory.OBFUSCATION,
-                    sub_findings=sub,
-                ))
+                results.append(
+                    DecodedPayload(
+                        original_encoded=line[:50],
+                        decoded_text=rot13[:200],
+                        encoding="rot13",
+                        file=filepath,
+                        line_number=line_num,
+                        severity=Severity.HIGH,
+                        description="ROT13エンコードされた行に悪意あるパターンが検出された",
+                        category=FindingCategory.OBFUSCATION,
+                        sub_findings=sub,
+                    )
+                )
 
     return results

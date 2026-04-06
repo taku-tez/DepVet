@@ -9,13 +9,11 @@ from depvet.analyzer.import_diff import (
 
 
 def make_diff(lines: list[str], filepath: str = "test.py") -> str:
-    return "\n".join(
-        [f"--- a/{filepath}", f"+++ b/{filepath}", "@@ -1,1 +1,5 @@"]
-        + [f"+{line}" for line in lines]
-    )
+    return "\n".join([f"--- a/{filepath}", f"+++ b/{filepath}", "@@ -1,1 +1,5 @@"] + [f"+{line}" for line in lines])
 
 
 # ─── _parse_import_line ───────────────────────────────────────────────────────
+
 
 def test_parse_simple_import():
     result = _parse_import_line("import socket")
@@ -46,6 +44,7 @@ def test_parse_normal_code():
 
 
 # ─── analyze_imports ─────────────────────────────────────────────────────────
+
 
 def test_detect_socket_import():
     diff = make_diff(["import socket"])
@@ -111,6 +110,7 @@ def test_urllib_request_medium():
 
 
 # ─── import_signals_to_context ───────────────────────────────────────────────
+
 
 def test_context_format_high():
     signals = [ImportSignal("socket", None, [], "HIGH", "socket imported")]

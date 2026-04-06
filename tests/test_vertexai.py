@@ -16,6 +16,7 @@ from depvet.differ.chunker import DiffChunk, DiffFile
 def _reload_vertexai_module():
     """Reload the vertexai module before each test to prevent mock contamination."""
     import depvet.analyzer.vertexai as m
+
     importlib.reload(m)
     yield
     importlib.reload(m)
@@ -29,11 +30,13 @@ def _make_chunk(content: str = "+import os\n") -> DiffChunk:
 
 # ─── VertexClaudeAnalyzer ────────────────────────────────────────────────────
 
+
 class TestVertexClaudeAnalyzer:
     def test_import_error_without_package(self):
         with patch.dict("sys.modules", {"anthropic": None}):
             import importlib
             import depvet.analyzer.vertexai as m
+
             importlib.reload(m)
             with pytest.raises(ImportError, match="anthropic"):
                 m.VertexClaudeAnalyzer(project_id="proj", region="us-east5")
@@ -44,6 +47,7 @@ class TestVertexClaudeAnalyzer:
         mock_anthropic.AsyncAnthropicVertex.side_effect = KeyError("VERTEX_PROJECT_ID")
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
             from depvet.analyzer.vertexai import VertexClaudeAnalyzer
+
             with pytest.raises((ValueError, KeyError)):
                 VertexClaudeAnalyzer()
 
@@ -54,6 +58,7 @@ class TestVertexClaudeAnalyzer:
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
             from depvet.analyzer import vertexai as m
             import importlib
+
             importlib.reload(m)
             analyzer = m.VertexClaudeAnalyzer(
                 model="claude-opus-4@20250514",
@@ -67,14 +72,17 @@ class TestVertexClaudeAnalyzer:
         monkeypatch.setenv("VERTEX_PROJECT_ID", "my-project")
         mock_anthropic = MagicMock()
         mock_client = AsyncMock()
-        mock_client.messages.create = AsyncMock(return_value=MagicMock(
-            content=[MagicMock(text=json.dumps({"should_analyze": True, "reason": "suspicious"}))]
-        ))
+        mock_client.messages.create = AsyncMock(
+            return_value=MagicMock(
+                content=[MagicMock(text=json.dumps({"should_analyze": True, "reason": "suspicious"}))]
+            )
+        )
         mock_anthropic.AsyncAnthropicVertex.return_value = mock_client
 
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
             from depvet.analyzer import vertexai as m
             import importlib
+
             importlib.reload(m)
             analyzer = m.VertexClaudeAnalyzer(project_id="my-project", region="us-east5")
             chunk = _make_chunk("+import subprocess\n")
@@ -94,6 +102,7 @@ class TestVertexClaudeAnalyzer:
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
             from depvet.analyzer import vertexai as m
             import importlib
+
             importlib.reload(m)
             analyzer = m.VertexClaudeAnalyzer(project_id="my-project", region="us-east5")
             chunk = _make_chunk()
@@ -106,22 +115,23 @@ class TestVertexClaudeAnalyzer:
     @pytest.mark.asyncio
     async def test_deep_analyze_returns_dict(self, monkeypatch):
         monkeypatch.setenv("VERTEX_PROJECT_ID", "my-project")
-        verdict_json = json.dumps({
-            "verdict": "MALICIOUS",
-            "confidence": 0.95,
-            "severity": "CRITICAL",
-            "findings": [],
-        })
+        verdict_json = json.dumps(
+            {
+                "verdict": "MALICIOUS",
+                "confidence": 0.95,
+                "severity": "CRITICAL",
+                "findings": [],
+            }
+        )
         mock_anthropic = MagicMock()
         mock_client = AsyncMock()
-        mock_client.messages.create = AsyncMock(return_value=MagicMock(
-            content=[MagicMock(text=verdict_json)]
-        ))
+        mock_client.messages.create = AsyncMock(return_value=MagicMock(content=[MagicMock(text=verdict_json)]))
         mock_anthropic.AsyncAnthropicVertex.return_value = mock_client
 
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
             from depvet.analyzer import vertexai as m
             import importlib
+
             importlib.reload(m)
             analyzer = m.VertexClaudeAnalyzer(project_id="my-project", region="us-east5")
             chunk = _make_chunk()
@@ -141,6 +151,7 @@ class TestVertexClaudeAnalyzer:
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
             from depvet.analyzer import vertexai as m
             import importlib
+
             importlib.reload(m)
             analyzer = m.VertexClaudeAnalyzer(project_id="my-project", region="us-east5")
             chunk = _make_chunk()
@@ -152,11 +163,13 @@ class TestVertexClaudeAnalyzer:
 
 # ─── VertexGeminiAnalyzer ────────────────────────────────────────────────────
 
+
 class TestVertexGeminiAnalyzer:
     def test_import_error_without_package(self):
         with patch.dict("sys.modules", {"vertexai": None, "vertexai.generative_models": None}):
             import importlib
             import depvet.analyzer.vertexai as m
+
             importlib.reload(m)
             with pytest.raises(ImportError, match="google-cloud-aiplatform"):
                 m.VertexGeminiAnalyzer(project_id="proj")
@@ -168,6 +181,7 @@ class TestVertexGeminiAnalyzer:
         with patch.dict("sys.modules", {"vertexai": mock_vertexai, "vertexai.generative_models": mock_gen}):
             from depvet.analyzer import vertexai as m
             import importlib
+
             importlib.reload(m)
             analyzer = m.VertexGeminiAnalyzer(
                 model="gemini-2.0-flash-001",
@@ -191,6 +205,7 @@ class TestVertexGeminiAnalyzer:
         with patch.dict("sys.modules", {"vertexai": mock_vertexai, "vertexai.generative_models": mock_gen}):
             from depvet.analyzer import vertexai as m
             import importlib
+
             importlib.reload(m)
             analyzer = m.VertexGeminiAnalyzer(project_id="my-project")
             chunk = _make_chunk()
@@ -201,6 +216,7 @@ class TestVertexGeminiAnalyzer:
 
 
 # ─── CLI provider routing ─────────────────────────────────────────────────────
+
 
 class TestProviderRouting:
     def test_vertex_claude_provider_aliases(self):

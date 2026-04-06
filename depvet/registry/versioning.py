@@ -61,4 +61,3 @@ def sort_versions(versions: list[str], ecosystem: str) -> list[str]:
     if ecosystem in {"npm", "go", "cargo"}:
         return sorted(versions, key=_semver_key)
     return sorted(versions)
-

@@ -79,7 +79,15 @@ class VerdictMerger:
     - summary: take summary from the most severe chunk
     """
 
-    def merge(self, raw_verdicts: list[dict], model: str, diff_stats: DiffStats, start_ms: int, rule_matches: list | None = None, version_context: VersionTransitionContext | None = None) -> Verdict:
+    def merge(
+        self,
+        raw_verdicts: list[dict],
+        model: str,
+        diff_stats: DiffStats,
+        start_ms: int,
+        rule_matches: list | None = None,
+        version_context: VersionTransitionContext | None = None,
+    ) -> Verdict:
         if not raw_verdicts:
             return Verdict(
                 verdict=VerdictType.UNKNOWN,
@@ -98,9 +106,7 @@ class VerdictMerger:
         # Find strictest verdict
         best_verdict_raw = max(
             raw_verdicts,
-            key=lambda r: VERDICT_PRIORITY.get(
-                VerdictType(r.get("verdict", "UNKNOWN")), 0
-            ),
+            key=lambda r: VERDICT_PRIORITY.get(VerdictType(r.get("verdict", "UNKNOWN")), 0),
         )
         best_verdict_type = VerdictType(best_verdict_raw.get("verdict", "UNKNOWN"))
 
@@ -113,10 +119,7 @@ class VerdictMerger:
         if total_findings == 0:
             confidence = sum(r.get("confidence", 0.5) for r in raw_verdicts) / len(raw_verdicts)
         else:
-            weighted = sum(
-                r.get("confidence", 0.5) * len(r.get("findings", []))
-                for r in raw_verdicts
-            )
+            weighted = sum(r.get("confidence", 0.5) * len(r.get("findings", [])) for r in raw_verdicts)
             confidence = weighted / total_findings
 
         # Deduplicate findings by (file, category)
@@ -168,16 +171,18 @@ class VerdictMerger:
                     evidence=rm.evidence,
                 )
                 if key not in rule_keys:
-                    merged_findings.append(Finding(
-                        category=rm.category,
-                        description=rm.description,
-                        file=rm.file,
-                        line_start=rm.line_number,
-                        line_end=rm.line_number,
-                        evidence=rm.evidence,
-                        cwe=rm.cwe,
-                        severity=rm.severity,
-                    ))
+                    merged_findings.append(
+                        Finding(
+                            category=rm.category,
+                            description=rm.description,
+                            file=rm.file,
+                            line_start=rm.line_number,
+                            line_end=rm.line_number,
+                            evidence=rm.evidence,
+                            cwe=rm.cwe,
+                            severity=rm.severity,
+                        )
+                    )
                     rule_keys.add(key)
 
             # Escalate verdict if rule matches are more severe
@@ -197,13 +202,10 @@ class VerdictMerger:
             confidence = min(1.0, confidence + version_context.total_confidence_boost)
 
             has_critical_rule = any(
-                getattr(m, "severity", None) and m.severity.value == "CRITICAL"
-                for m in (rule_matches or [])
+                getattr(m, "severity", None) and m.severity.value == "CRITICAL" for m in (rule_matches or [])
             )
             has_high_version_signal = version_context.has_high_risk_signals
-            llm_high_confidence_benign = (
-                best_verdict_type == VerdictType.BENIGN and confidence > 0.90
-            )
+            llm_high_confidence_benign = best_verdict_type == VerdictType.BENIGN and confidence > 0.90
 
             # Escalation rules (with high-confidence BENIGN protection):
             # Rule A: CRITICAL rule + HIGH signal → MALICIOUS (always, even high-conf benign)
@@ -274,9 +276,9 @@ class DeepAnalyzer:
 
         raw_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        valid_results = []
+        valid_results: list[dict] = []
         for i, result in enumerate(raw_results):
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 logger.error(f"Chunk {i} analysis failed: {result}")
             else:
                 valid_results.append(result)
@@ -284,6 +286,7 @@ class DeepAnalyzer:
         # Augment version_context with zero-code-change signal if new_deps provided
         if new_deps and diff_stats:
             from depvet.analyzer.version_signal import analyze_zero_code_change_signal
+
             zcc_signals = await analyze_zero_code_change_signal(diff_stats, new_deps, ecosystem)
             if zcc_signals:
                 if version_context is None:
@@ -294,10 +297,7 @@ class DeepAnalyzer:
                         new_version=new_version,
                     )
                 version_context.signals.extend(zcc_signals)
-                logger.info(
-                    f"Zero-code-change signals for {package_name}: "
-                    f"{[s.signal_id for s in zcc_signals]}"
-                )
+                logger.info(f"Zero-code-change signals for {package_name}: {[s.signal_id for s in zcc_signals]}")
 
         return self.merger.merge(
             raw_verdicts=valid_results,

@@ -24,19 +24,18 @@ from typing import Optional
 @dataclass
 class NewDependency:
     """A newly added dependency detected from a manifest diff."""
+
     name: str
-    version_spec: str        # e.g. "^4.2.1", ">=1.0", "*"
-    ecosystem: str           # "npm" | "pypi"
-    manifest_file: str       # "package.json", "pyproject.toml", etc.
-    is_dev: bool = False     # devDependencies / dev extras
+    version_spec: str  # e.g. "^4.2.1", ">=1.0", "*"
+    ecosystem: str  # "npm" | "pypi"
+    manifest_file: str  # "package.json", "pyproject.toml", etc.
+    is_dev: bool = False  # devDependencies / dev extras
     line_number: Optional[int] = None
 
 
 # ─── npm / package.json ────────────────────────────────────────────────────
 
-_NPM_DEP_RE = re.compile(
-    r"""^\s*"(?P<name>@?[a-zA-Z0-9_\-./]+)"\s*:\s*"(?P<version>[^"]+)"""
-)
+_NPM_DEP_RE = re.compile(r"""^\s*"(?P<name>@?[a-zA-Z0-9_\-./]+)"\s*:\s*"(?P<version>[^"]+)""")
 
 _NPM_SECTION_RE = re.compile(
     r'"(?P<section>dependencies|devDependencies|peerDependencies|optionalDependencies)"\s*:\s*\{'
@@ -69,43 +68,76 @@ def _extract_npm_deps(diff_content: str, filepath: str = "package.json") -> list
             # Skip clearly internal/test packages
             if name.startswith("//") or name == "":
                 continue
-            deps.append(NewDependency(
-                name=name,
-                version_spec=version,
-                ecosystem="npm",
-                manifest_file=filepath,
-                is_dev=current_section != "dependencies",
-                line_number=line_number,
-            ))
+            deps.append(
+                NewDependency(
+                    name=name,
+                    version_spec=version,
+                    ecosystem="npm",
+                    manifest_file=filepath,
+                    is_dev=current_section != "dependencies",
+                    line_number=line_number,
+                )
+            )
 
     return deps
 
 
 # ─── PyPI / pyproject.toml ─────────────────────────────────────────────────
 
-_PYPI_DEP_RE = re.compile(
-    r"""^\s*"?(?P<name>[A-Za-z0-9_\-\.]+)\s*(?P<version>[><=!~\^][^"#,\n]*)?"""
-)
+_PYPI_DEP_RE = re.compile(r"""^\s*"?(?P<name>[A-Za-z0-9_\-\.]+)\s*(?P<version>[><=!~\^][^"#,\n]*)?""")
 
 _PYPI_EXTRAS_SECTION_RE = re.compile(
-    r'^\[tool\.(?:poetry|hatch|flit)\.dependencies\]|^\[project\]|^\[project\.optional-dependencies\.'
+    r"^\[tool\.(?:poetry|hatch|flit)\.dependencies\]|^\[project\]|^\[project\.optional-dependencies\."
 )
 
 # pyproject.toml / setup.cfg metadata keys — NOT package names
-_PYPI_METADATA_KEYS = frozenset({
-    "name", "version", "description", "readme", "license", "requires-python",
-    "requires_python", "dependencies", "optional-dependencies", "optional_dependencies",
-    "authors", "maintainers", "keywords", "classifiers", "urls", "homepage",
-    "repository", "documentation", "packages", "include", "exclude",
-    "build-backend", "build_backend", "requires",
-    "install_requires", "setup_requires", "tests_require", "extras_require",
-    "python_requires", "long_description", "long_description_content_type",
-    "project_urls", "zip_safe", "package_dir", "package_data", "data_files",
-    "tool", "project", "build-system", "build_system",
-})
+_PYPI_METADATA_KEYS = frozenset(
+    {
+        "name",
+        "version",
+        "description",
+        "readme",
+        "license",
+        "requires-python",
+        "requires_python",
+        "dependencies",
+        "optional-dependencies",
+        "optional_dependencies",
+        "authors",
+        "maintainers",
+        "keywords",
+        "classifiers",
+        "urls",
+        "homepage",
+        "repository",
+        "documentation",
+        "packages",
+        "include",
+        "exclude",
+        "build-backend",
+        "build_backend",
+        "requires",
+        "install_requires",
+        "setup_requires",
+        "tests_require",
+        "extras_require",
+        "python_requires",
+        "long_description",
+        "long_description_content_type",
+        "project_urls",
+        "zip_safe",
+        "package_dir",
+        "package_data",
+        "data_files",
+        "tool",
+        "project",
+        "build-system",
+        "build_system",
+    }
+)
 
 # TOML key assignment: key = value or key = [ (not a dep)
-_PYPI_KEY_ASSIGNMENT_RE = re.compile(r'^[A-Za-z0-9_\-]+\s*=')
+_PYPI_KEY_ASSIGNMENT_RE = re.compile(r"^[A-Za-z0-9_\-]+\s*=")
 
 
 def _extract_pypi_deps(diff_content: str, filepath: str = "pyproject.toml") -> list[NewDependency]:
@@ -145,19 +177,22 @@ def _extract_pypi_deps(diff_content: str, filepath: str = "pyproject.toml") -> l
             name = m.group("name")
             version = (m.group("version") or "").strip().strip('"').strip("'").strip(",")
             if name and not name.startswith("-") and len(name) > 1:
-                deps.append(NewDependency(
-                    name=name,
-                    version_spec=version,
-                    ecosystem="pypi",
-                    manifest_file=filepath,
-                    is_dev=is_dev,
-                    line_number=line_number,
-                ))
+                deps.append(
+                    NewDependency(
+                        name=name,
+                        version_spec=version,
+                        ecosystem="pypi",
+                        manifest_file=filepath,
+                        is_dev=is_dev,
+                        line_number=line_number,
+                    )
+                )
 
     return deps
 
 
 # ─── Unified extractor ─────────────────────────────────────────────────────
+
 
 def extract_new_dependencies(diff_content: str, filepath: str = "") -> list[NewDependency]:
     """
@@ -195,13 +230,32 @@ def deps_to_watchlist_entries(deps: list[NewDependency]) -> list[tuple[str, str]
     Filters out dev dependencies and well-known safe packages.
     """
     # Popular well-known packages that don't need extra scanning
-    KNOWN_SAFE = frozenset({
-        "lodash", "express", "react", "vue", "angular", "typescript",
-        "webpack", "babel", "eslint", "prettier", "jest",
-        "requests", "flask", "django", "numpy", "pandas",
-        "pytest", "setuptools", "wheel", "pip",
-        "follow-redirects", "proxy-from-env",  # axios legit deps
-    })
+    KNOWN_SAFE = frozenset(
+        {
+            "lodash",
+            "express",
+            "react",
+            "vue",
+            "angular",
+            "typescript",
+            "webpack",
+            "babel",
+            "eslint",
+            "prettier",
+            "jest",
+            "requests",
+            "flask",
+            "django",
+            "numpy",
+            "pandas",
+            "pytest",
+            "setuptools",
+            "wheel",
+            "pip",
+            "follow-redirects",
+            "proxy-from-env",  # axios legit deps
+        }
+    )
 
     results = []
     for dep in deps:
@@ -251,7 +305,7 @@ def _extract_go_deps(diff_content: str, filepath: str = "go.mod") -> list[NewDep
 
         # Single-line require: require github.com/foo/bar v1.0.0
         if line.startswith("require "):
-            line = line[len("require "):].strip()
+            line = line[len("require ") :].strip()
 
         # Check for // indirect marker
         is_indirect = "// indirect" in line
@@ -263,14 +317,16 @@ def _extract_go_deps(diff_content: str, filepath: str = "go.mod") -> list[NewDep
             # Skip go directive, toolchain, etc.
             if module in ("go", "toolchain") or "." not in module:
                 continue
-            deps.append(NewDependency(
-                name=module,
-                version_spec=version,
-                ecosystem="go",
-                manifest_file=filepath,
-                is_dev=is_indirect,  # indirect ≈ dev (transitive)
-                line_number=line_number,
-            ))
+            deps.append(
+                NewDependency(
+                    name=module,
+                    version_spec=version,
+                    ecosystem="go",
+                    manifest_file=filepath,
+                    is_dev=is_indirect,  # indirect ≈ dev (transitive)
+                    line_number=line_number,
+                )
+            )
 
     return deps
 
@@ -278,24 +334,40 @@ def _extract_go_deps(diff_content: str, filepath: str = "go.mod") -> list[NewDep
 # ─── Cargo / Cargo.toml ────────────────────────────────────────────────────
 
 # Cargo.toml: package_name = "version" or package_name = { version = "1.0" }
-_CARGO_SIMPLE_RE = re.compile(
-    r"""^(?P<name>[a-zA-Z0-9_\-]+)\s*=\s*"(?P<version>[^"]+)"\s*$"""
-)
-_CARGO_TABLE_RE = re.compile(
-    r"""^(?P<name>[a-zA-Z0-9_\-]+)\s*=\s*\{"""
-)
-_CARGO_VERSION_IN_TABLE_RE = re.compile(
-    r'version\s*=\s*"(?P<version>[^"]+)"'
-)
+_CARGO_SIMPLE_RE = re.compile(r"""^(?P<name>[a-zA-Z0-9_\-]+)\s*=\s*"(?P<version>[^"]+)"\s*$""")
+_CARGO_TABLE_RE = re.compile(r"""^(?P<name>[a-zA-Z0-9_\-]+)\s*=\s*\{""")
+_CARGO_VERSION_IN_TABLE_RE = re.compile(r'version\s*=\s*"(?P<version>[^"]+)"')
 
 # Cargo.toml metadata keys that are NOT crate names
-_CARGO_METADATA_KEYS = frozenset({
-    "name", "version", "edition", "authors", "description", "license",
-    "repository", "homepage", "documentation", "readme", "keywords",
-    "categories", "build", "links", "resolver", "publish", "workspace",
-    "rust-version", "exclude", "include", "autobins", "autoexamples",
-    "autotests", "autobenches", "default-run",
-})
+_CARGO_METADATA_KEYS = frozenset(
+    {
+        "name",
+        "version",
+        "edition",
+        "authors",
+        "description",
+        "license",
+        "repository",
+        "homepage",
+        "documentation",
+        "readme",
+        "keywords",
+        "categories",
+        "build",
+        "links",
+        "resolver",
+        "publish",
+        "workspace",
+        "rust-version",
+        "exclude",
+        "include",
+        "autobins",
+        "autoexamples",
+        "autotests",
+        "autobenches",
+        "default-run",
+    }
+)
 
 
 def _extract_cargo_deps(diff_content: str, filepath: str = "Cargo.toml") -> list[NewDependency]:
@@ -332,14 +404,16 @@ def _extract_cargo_deps(diff_content: str, filepath: str = "Cargo.toml") -> list
             name = m.group("name")
             version = m.group("version")
             if name.lower() not in _CARGO_METADATA_KEYS and len(name) > 1:
-                deps.append(NewDependency(
-                    name=name,
-                    version_spec=version,
-                    ecosystem="cargo",
-                    manifest_file=filepath,
-                    is_dev=is_dev,
-                    line_number=line_number,
-                ))
+                deps.append(
+                    NewDependency(
+                        name=name,
+                        version_spec=version,
+                        ecosystem="cargo",
+                        manifest_file=filepath,
+                        is_dev=is_dev,
+                        line_number=line_number,
+                    )
+                )
             continue
 
         # Table format: serde = { version = "1.0", features = ["derive"] }
@@ -349,13 +423,15 @@ def _extract_cargo_deps(diff_content: str, filepath: str = "Cargo.toml") -> list
             vm = _CARGO_VERSION_IN_TABLE_RE.search(line)
             version = vm.group("version") if vm else ""
             if name.lower() not in _CARGO_METADATA_KEYS and len(name) > 1:
-                deps.append(NewDependency(
-                    name=name,
-                    version_spec=version,
-                    ecosystem="cargo",
-                    manifest_file=filepath,
-                    is_dev=is_dev,
-                    line_number=line_number,
-                ))
+                deps.append(
+                    NewDependency(
+                        name=name,
+                        version_spec=version,
+                        ecosystem="cargo",
+                        manifest_file=filepath,
+                        is_dev=is_dev,
+                        line_number=line_number,
+                    )
+                )
 
     return deps

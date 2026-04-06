@@ -10,6 +10,7 @@ from depvet.watchlist.sbom import SBOMParser, _parse_purl
 
 # ─── purl parsing ────────────────────────────────────────────────────────────
 
+
 class TestPurlParsing:
     def test_pypi_with_version(self):
         e = _parse_purl("pkg:pypi/requests@2.31.0")
@@ -54,6 +55,7 @@ class TestPurlParsing:
 
 # ─── CycloneDX JSON ──────────────────────────────────────────────────────────
 
+
 class TestCycloneDXJSON:
     @pytest.fixture
     def parser(self):
@@ -75,7 +77,7 @@ class TestCycloneDXJSON:
                 {"type": "library", "name": "requests", "version": "2.31.0", "purl": "pkg:pypi/requests@2.31.0"},
                 {"type": "library", "name": "flask", "version": "3.0.0", "purl": "pkg:pypi/flask@3.0.0"},
                 {"type": "library", "name": "axios", "version": "1.6.0", "purl": "pkg:npm/axios@1.6.0"},
-            ]
+            ],
         }
         entries = self._write_and_parse(data, parser)
         names = [e.name for e in entries]
@@ -93,7 +95,7 @@ class TestCycloneDXJSON:
             "bomFormat": "CycloneDX",
             "components": [
                 {"type": "library", "name": "mypkg", "version": "1.0.0"},
-            ]
+            ],
         }
         entries = self._write_and_parse(data, parser)
         assert len(entries) == 1
@@ -105,7 +107,7 @@ class TestCycloneDXJSON:
             "bomFormat": "CycloneDX",
             "components": [
                 {"type": "application", "name": "app", "purl": "pkg:pypi/app@1.0.0"},
-            ]
+            ],
         }
         entries = self._write_and_parse(data, parser)
         # purl-based parsing includes all types
@@ -117,7 +119,7 @@ class TestCycloneDXJSON:
             "components": [
                 {"type": "library", "name": "serde", "purl": "pkg:cargo/serde@1.0.0"},
                 {"type": "library", "name": "spring", "purl": "pkg:maven/org.springframework/spring-core@5.3.0"},
-            ]
+            ],
         }
         entries = self._write_and_parse(data, parser)
         ecosystems = {e.ecosystem for e in entries}
@@ -127,15 +129,14 @@ class TestCycloneDXJSON:
     def test_version_preserved(self, parser):
         data = {
             "bomFormat": "CycloneDX",
-            "components": [
-                {"type": "library", "name": "pkg", "purl": "pkg:pypi/pkg@3.14.159"}
-            ]
+            "components": [{"type": "library", "name": "pkg", "purl": "pkg:pypi/pkg@3.14.159"}],
         }
         entries = self._write_and_parse(data, parser)
         assert entries[0].current_version == "3.14.159"
 
 
 # ─── CycloneDX XML ───────────────────────────────────────────────────────────
+
 
 class TestCycloneDXXML:
     @pytest.fixture
@@ -196,6 +197,7 @@ class TestCycloneDXXML:
 
 # ─── SPDX JSON ───────────────────────────────────────────────────────────────
 
+
 class TestSPDXJSON:
     @pytest.fixture
     def parser(self):
@@ -210,19 +212,15 @@ class TestSPDXJSON:
                     "SPDXID": "SPDXRef-requests",
                     "name": "requests",
                     "versionInfo": "2.31.0",
-                    "externalRefs": [
-                        {"referenceType": "purl", "referenceLocator": "pkg:pypi/requests@2.31.0"}
-                    ]
+                    "externalRefs": [{"referenceType": "purl", "referenceLocator": "pkg:pypi/requests@2.31.0"}],
                 },
                 {
                     "SPDXID": "SPDXRef-axios",
                     "name": "axios",
                     "versionInfo": "1.6.0",
-                    "externalRefs": [
-                        {"referenceType": "purl", "referenceLocator": "pkg:npm/axios@1.6.0"}
-                    ]
-                }
-            ]
+                    "externalRefs": [{"referenceType": "purl", "referenceLocator": "pkg:npm/axios@1.6.0"}],
+                },
+            ],
         }
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(data, f)
@@ -238,14 +236,7 @@ class TestSPDXJSON:
     def test_spdx_fallback_without_purl(self, parser):
         data = {
             "SPDXID": "SPDXRef-DOCUMENT",
-            "packages": [
-                {
-                    "SPDXID": "SPDXRef-pkg",
-                    "name": "mypkg",
-                    "versionInfo": "1.0.0",
-                    "externalRefs": []
-                }
-            ]
+            "packages": [{"SPDXID": "SPDXRef-pkg", "name": "mypkg", "versionInfo": "1.0.0", "externalRefs": []}],
         }
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(data, f)
@@ -269,6 +260,7 @@ class TestSPDXJSON:
 
 
 # ─── Error handling ───────────────────────────────────────────────────────────
+
 
 class TestParserErrors:
     @pytest.fixture

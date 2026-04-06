@@ -15,8 +15,7 @@ def make_chunk(files: list[DiffFile], idx: int = 0) -> DiffChunk:
     return chunk
 
 
-def make_file(path: str, content: str = "", binary: bool = False,
-              is_new: bool = False) -> DiffFile:
+def make_file(path: str, content: str = "", binary: bool = False, is_new: bool = False) -> DiffFile:
     return DiffFile(path=path, content=content, is_binary=binary, is_new=is_new)
 
 
@@ -28,6 +27,7 @@ def mock_analyzer(triage_result=(True, "suspicious")):
 
 # ─── Rule-first: CRITICAL immediate flag ─────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_critical_rule_skips_llm():
     """CRITICAL rule match → immediate analyze without calling LLM."""
@@ -36,9 +36,7 @@ async def test_critical_rule_skips_llm():
     triage = TriageAnalyzer(analyzer)
 
     chunk = make_chunk([make_file("setup.py", diff)])
-    should, reason, rule_matches = await triage.should_analyze(
-        [chunk], "evil-pkg", "1.0.0", "1.0.1"
-    )
+    should, reason, rule_matches = await triage.should_analyze([chunk], "evil-pkg", "1.0.0", "1.0.1")
 
     assert should is True
     assert rule_matches  # rules found something
@@ -54,15 +52,14 @@ async def test_aws_creds_detected_without_llm():
     triage = TriageAnalyzer(analyzer)
 
     chunk = make_chunk([make_file("auth.py", diff)])
-    should, reason, rule_matches = await triage.should_analyze(
-        [chunk], "mypkg", "1.0", "1.1"
-    )
+    should, reason, rule_matches = await triage.should_analyze([chunk], "mypkg", "1.0", "1.1")
 
     assert should is True
     assert any(m.rule_id in ("ENV_EXFIL", "AWS_CREDS") for m in rule_matches)
 
 
 # ─── Benign shortcut ──────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_comment_only_diff_skip_llm():
@@ -72,9 +69,7 @@ async def test_comment_only_diff_skip_llm():
     triage = TriageAnalyzer(analyzer)
 
     chunk = make_chunk([make_file("utils.py", diff)])
-    should, reason, rule_matches = await triage.should_analyze(
-        [chunk], "mypkg", "1.0", "1.1"
-    )
+    should, reason, rule_matches = await triage.should_analyze([chunk], "mypkg", "1.0", "1.1")
 
     # Should skip without LLM call
     assert should is False
@@ -82,6 +77,7 @@ async def test_comment_only_diff_skip_llm():
 
 
 # ─── LLM fallback ─────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_llm_called_when_no_rules_match():
@@ -91,9 +87,7 @@ async def test_llm_called_when_no_rules_match():
     triage = TriageAnalyzer(analyzer)
 
     chunk = make_chunk([make_file("helpers.py", diff)])
-    should, reason, rule_matches = await triage.should_analyze(
-        [chunk], "mypkg", "1.0", "1.1"
-    )
+    should, reason, rule_matches = await triage.should_analyze([chunk], "mypkg", "1.0", "1.1")
 
     assert analyzer.triage.called
     assert should is True
@@ -108,14 +102,13 @@ async def test_llm_says_skip_benign():
     triage = TriageAnalyzer(analyzer)
 
     chunk = make_chunk([make_file("config.py", diff)])
-    should, reason, rule_matches = await triage.should_analyze(
-        [chunk], "mypkg", "1.0", "1.1"
-    )
+    should, reason, rule_matches = await triage.should_analyze([chunk], "mypkg", "1.0", "1.1")
 
     assert should is False
 
 
 # ─── Binary/new file in later chunks ─────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_binary_file_in_later_chunk_forces_analyze():
@@ -127,9 +120,7 @@ async def test_binary_file_in_later_chunk_forces_analyze():
     chunk1 = make_chunk([make_file("config.py", diff)], idx=0)
     chunk2 = make_chunk([make_file("evil.so", "", binary=True)], idx=1)
 
-    should, reason, rule_matches = await triage.should_analyze(
-        [chunk1, chunk2], "mypkg", "1.0", "1.1"
-    )
+    should, reason, rule_matches = await triage.should_analyze([chunk1, chunk2], "mypkg", "1.0", "1.1")
 
     assert should is True
     assert "binary" in reason.lower() or "evil.so" in reason
@@ -145,14 +136,13 @@ async def test_new_file_in_later_chunk_forces_analyze():
     chunk1 = make_chunk([make_file("config.py", diff)], idx=0)
     chunk2 = make_chunk([make_file("new_module.py", "+import os", is_new=True)], idx=1)
 
-    should, reason, rule_matches = await triage.should_analyze(
-        [chunk1, chunk2], "mypkg", "1.0", "1.1"
-    )
+    should, reason, rule_matches = await triage.should_analyze([chunk1, chunk2], "mypkg", "1.0", "1.1")
 
     assert should is True
 
 
 # ─── Empty input ──────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_empty_chunks_returns_false():
@@ -165,6 +155,7 @@ async def test_empty_chunks_returns_false():
 
 
 # ─── Return type ──────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_return_is_always_3_tuple():

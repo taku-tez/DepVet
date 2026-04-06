@@ -18,6 +18,7 @@ runner = CliRunner()
 
 # ── help / version ──────────────────────────────────────────────────
 
+
 def test_version():
     result = runner.invoke(cli, ["--version"])
     assert result.exit_code == 0
@@ -52,6 +53,7 @@ def test_monitor_help():
 
 # ── scan with mocked internals ──────────────────────────────────────
 
+
 def test_scan_no_triage_mocked():
     """Full scan path with --no-triage, mocked so no network or LLM calls happen."""
     with patch("depvet.cli._scan", new_callable=AsyncMock, return_value=None) as mock_scan:
@@ -64,7 +66,7 @@ def test_scan_no_triage_mocked():
     mock_scan.assert_awaited_once()
     # Verify the correct arguments were forwarded
     _args, _kwargs = mock_scan.call_args
-    assert _args[1] == "requests"       # package
-    assert _args[2] == "2.31.0"         # old_version
-    assert _args[3] == "2.32.0"         # new_version
-    assert _args[6] is True             # no_triage flag
+    assert _args[1] == "requests"  # package
+    assert _args[2] == "2.31.0"  # old_version
+    assert _args[3] == "2.32.0"  # new_version
+    assert _args[6] is True  # no_triage flag

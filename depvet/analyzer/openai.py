@@ -10,6 +10,9 @@ from pathlib import Path
 from typing import Optional
 
 from depvet.analyzer.base import BaseAnalyzer
+from depvet.analyzer.import_diff import analyze_imports, import_signals_to_context
+from depvet.analyzer.decode_scan import decode_and_scan
+from depvet.analyzer.ast_scan import ast_scan_diff
 from depvet.differ.chunker import DiffChunk
 
 logger = logging.getLogger(__name__)
@@ -44,6 +47,7 @@ class OpenAIAnalyzer(BaseAnalyzer):
     ):
         try:
             from openai import AsyncOpenAI
+
             self._client = AsyncOpenAI(
                 api_key=api_key or os.environ.get("OPENAI_API_KEY"),
             )
@@ -55,7 +59,8 @@ class OpenAIAnalyzer(BaseAnalyzer):
         self.max_tokens = max_tokens
         self.timeout = timeout
         self._triage_template = _load_prompt("triage.txt")
-        self._deep_template = _load_prompt("deep_analysis.txt")
+        self._deep_template_pypi = _load_prompt("deep_analysis.txt")
+        self._deep_template_npm = _load_prompt("deep_analysis_npm.txt")
 
     def get_model_name(self) -> str:
         return self.model
@@ -96,7 +101,31 @@ class OpenAIAnalyzer(BaseAnalyzer):
         new_version: str,
         ecosystem: str,
     ) -> dict:
-        prompt = self._deep_template.format(
+        # Build pre-analysis context from static analyzers
+        pre_context_parts = []
+        import_sigs = analyze_imports(chunk.content)
+        if import_sigs:
+            ctx = import_signals_to_context(import_sigs)
+            if ctx:
+                pre_context_parts.append(ctx)
+        decoded_hits = decode_and_scan(chunk.content)
+        if decoded_hits:
+            lines = ["【デコードスキャン検出】"]
+            for d in decoded_hits[:3]:
+                lines.append(f"🚨 [{d.encoding}] {d.description[:80]}")
+            pre_context_parts.append("\n".join(lines))
+        if ecosystem == "pypi":
+            ast_hits = ast_scan_diff(chunk.content)
+            if ast_hits:
+                lines = ["【AST解析検出】"]
+                for a in ast_hits[:3]:
+                    lines.append(f"⚠️  [{a.severity.value}] {a.finding_id}: {a.description[:80]}")
+                pre_context_parts.append("\n".join(lines))
+        pre_analysis_context = ("\n\n".join(pre_context_parts) + "\n") if pre_context_parts else ""
+
+        # Use ecosystem-specific prompt
+        template = self._deep_template_npm if ecosystem == "npm" else self._deep_template_pypi
+        prompt = template.format(
             chunk_index=chunk_index + 1,
             total_chunks=total_chunks,
             ecosystem=ecosystem,
@@ -104,6 +133,7 @@ class OpenAIAnalyzer(BaseAnalyzer):
             old_version=old_version,
             new_version=new_version,
             diff_chunk=chunk.content,
+            pre_analysis_context=pre_analysis_context,
         )
         response = await self._client.chat.completions.create(
             model=self.model,

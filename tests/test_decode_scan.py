@@ -5,10 +5,7 @@ from depvet.analyzer.decode_scan import decode_and_scan, _try_decode_b64, _try_d
 
 
 def make_diff(lines: list[str], filepath: str = "evil.py") -> str:
-    return "\n".join(
-        [f"--- a/{filepath}", f"+++ b/{filepath}", "@@ -1 +1,5 @@"]
-        + [f"+{line}" for line in lines]
-    )
+    return "\n".join([f"--- a/{filepath}", f"+++ b/{filepath}", "@@ -1 +1,5 @@"] + [f"+{line}" for line in lines])
 
 
 def b64(text: str) -> str:
@@ -16,6 +13,7 @@ def b64(text: str) -> str:
 
 
 # ─── _try_decode_b64 ──────────────────────────────────────────────────────────
+
 
 def test_decode_b64_valid_text():
     encoded = b64("import os; os.system('id')")
@@ -31,6 +29,7 @@ def test_decode_b64_invalid_returns_none():
 def test_decode_b64_binary_returns_none():
     # Binary content (non-UTF8) should return None
     import struct
+
     encoded = base64.b64encode(struct.pack("I" * 10, *range(10))).decode()
     # Binary data may decode to garbage — should be filtered
     _try_decode_b64(encoded)
@@ -38,6 +37,7 @@ def test_decode_b64_binary_returns_none():
 
 
 # ─── _try_decode_hex ─────────────────────────────────────────────────────────
+
 
 def test_decode_hex_valid():
     text = "import os"
@@ -57,6 +57,7 @@ def test_decode_hex_odd_length():
 
 
 # ─── decode_and_scan ─────────────────────────────────────────────────────────
+
 
 def test_detect_hidden_exec_in_b64():
     """Base64 string containing exec should be flagged."""
@@ -119,17 +120,20 @@ def test_no_false_positive_short_string():
 def test_line_numbers_recorded():
     payload = "import os; os.system('id')"
     encoded = b64(payload)
-    diff = make_diff([
-        "x = 1",
-        f"Y = '{encoded}'",
-        "z = 2",
-    ])
+    diff = make_diff(
+        [
+            "x = 1",
+            f"Y = '{encoded}'",
+            "z = 2",
+        ]
+    )
     results = decode_and_scan(diff, "evil.py")
     assert results
     assert results[0].line_number is not None
 
 
 # ─── Edge cases ───────────────────────────────────────────────────────────────
+
 
 def test_empty_diff_returns_empty():
     results = decode_and_scan("", "test.py")

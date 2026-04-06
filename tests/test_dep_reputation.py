@@ -10,8 +10,10 @@ from depvet.analyzer.dep_reputation import (
 
 # ─── _days_since ─────────────────────────────────────────────────────────────
 
+
 def test_days_since_recent():
     from datetime import datetime, timezone, timedelta
+
     recent = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
     days = _days_since(recent)
     assert days is not None
@@ -35,6 +37,7 @@ def test_days_since_with_z():
 
 
 # ─── _assess_signals ─────────────────────────────────────────────────────────
+
 
 class TestAssessSignals:
     """Comprehensive signal assessment tests."""
@@ -79,7 +82,7 @@ class TestAssessSignals:
     def test_established_package_no_signals(self):
         """Well-established package should have no suspicious signals."""
         severity, signals, boost = _assess_signals(
-            age_days=2000,   # ~5 years old
+            age_days=2000,  # ~5 years old
             weekly_downloads=1_000_000,
             total_versions=100,
         )
@@ -141,6 +144,7 @@ class TestAssessSignals:
 
 # ─── DepReputationResult ─────────────────────────────────────────────────────
 
+
 class TestDepReputationResult:
     def test_is_suspicious_critical(self):
         r = DepReputationResult("pkg", "npm", "^1.0", severity="CRITICAL")
@@ -167,6 +171,7 @@ class TestDepReputationResult:
 
 
 # ─── Zero-code-change signal ─────────────────────────────────────────────────
+
 
 class TestZeroCodeChangeSignal:
     @pytest.mark.asyncio
@@ -229,10 +234,7 @@ class TestZeroCodeChangeSignal:
         from depvet.models.verdict import DiffStats
 
         stats = DiffStats(files_changed=1, lines_added=5, lines_removed=0)
-        deps = [
-            NewDependency(f"new-dep-{i}", "^1.0", "npm", "package.json")
-            for i in range(5)
-        ]
+        deps = [NewDependency(f"new-dep-{i}", "^1.0", "npm", "package.json") for i in range(5)]
         signals = await analyze_zero_code_change_signal(stats, deps, "npm")
         assert any(s.signal_id == "MANY_NEW_DEPS_AT_ONCE" for s in signals)
 
@@ -258,6 +260,7 @@ class TestZeroCodeChangeSignal:
 
 
 # ─── Evaluate functions (unit, no network) ────────────────────────────────────
+
 
 def test_assess_signals_score_boundary_high_medium():
     """Test boundary between HIGH and MEDIUM (score 35 = HIGH)."""

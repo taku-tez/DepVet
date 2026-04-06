@@ -26,6 +26,7 @@ def _create_pkg(base: Path, files: dict[str, bytes | str]) -> Path:
 
 # ─── _is_binary_file ─────────────────────────────────────────────────────────
 
+
 class TestIsBinaryFile:
     def test_python_file_not_binary(self, tmp_path):
         p = tmp_path / "module.py"
@@ -60,6 +61,7 @@ class TestIsBinaryFile:
 
 # ─── _read_lines ─────────────────────────────────────────────────────────────
 
+
 class TestReadLines:
     def test_reads_utf8(self, tmp_path):
         p = tmp_path / "test.py"
@@ -82,6 +84,7 @@ class TestReadLines:
 
 # ─── _collect_files ──────────────────────────────────────────────────────────
 
+
 class TestCollectFiles:
     def test_collects_all_files(self, tmp_path):
         (tmp_path / "a.py").write_text("x=1")
@@ -102,6 +105,7 @@ class TestCollectFiles:
 
 
 # ─── generate_diff ────────────────────────────────────────────────────────────
+
 
 class TestGenerateDiff:
     def test_identical_dirs_no_diff(self, tmp_path):
@@ -134,8 +138,7 @@ class TestGenerateDiff:
 
     def test_binary_file_detected(self, tmp_path):
         old = _create_pkg(tmp_path / "old", {"main.py": "pass\n"})
-        new = _create_pkg(tmp_path / "new", {"main.py": "pass\n",
-                                               "evil.so": b"\x7fELF\x00\x00\x00\x00"})
+        new = _create_pkg(tmp_path / "new", {"main.py": "pass\n", "evil.so": b"\x7fELF\x00\x00\x00\x00"})
         chunks, stats = generate_diff(old, new)
         assert "evil.so" in stats.binary_files
 

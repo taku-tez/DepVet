@@ -10,6 +10,7 @@ from depvet.differ.priority import priority_sort_key, should_skip
 @dataclass
 class DiffFile:
     """A single file's diff."""
+
     path: str
     content: str
     is_binary: bool = False
@@ -20,6 +21,7 @@ class DiffFile:
 @dataclass
 class DiffChunk:
     """A chunk of diff files for LLM analysis."""
+
     chunk_index: int
     total_files: int
     files: list[DiffFile] = field(default_factory=list)

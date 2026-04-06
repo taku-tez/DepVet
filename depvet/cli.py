@@ -17,6 +17,7 @@ from depvet import __version__
 try:
     from rich.console import Console
     from rich.table import Table
+
     _RICH = True
     console = Console()
 except ImportError:
@@ -26,20 +27,18 @@ except ImportError:
 logger = logging.getLogger("depvet")
 
 
-def _setup_logging(verbose: bool) -> None:
-    level = logging.DEBUG if verbose else logging.WARNING
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+def _setup_logging(verbose: bool, log_format: str = "text") -> None:
+    from depvet.logging import setup_logging
+
+    setup_logging(verbose, log_format)
 
 
 def _get_analyzer(config):
     """Create analyzer from config.
 
-    Supported providers (DEPVET_LLM_PROVIDER):
-      anthropic          — Anthropic API (default)
-      openai             — OpenAI API
+    Supported providers (config llm.provider or DEPVET_LLM_PROVIDER env):
+      anthropic / claude — Anthropic API (default)
+      openai             — OpenAI API (GPT-4o / GPT-4o-mini)
       vertex-claude      — Claude on Vertex AI (requires VERTEX_PROJECT_ID)
       vertex-gemini      — Gemini on Vertex AI (requires VERTEX_PROJECT_ID)
     """
@@ -53,7 +52,7 @@ def _get_analyzer(config):
     if provider == "openai":
         return OpenAIAnalyzer(
             model=config.llm.model,
-            triage_model=config.llm.triage_model if hasattr(config.llm, 'triage_model') else "gpt-4o-mini",
+            triage_model=config.llm.triage_model,
             api_key=api_key,
             max_tokens=config.llm.max_tokens,
         )
@@ -83,7 +82,6 @@ def _get_analyzer(config):
         )
 
 
-
 def _build_release_url(name: str, version: str, ecosystem: str) -> str:
     """Build registry URL for a package release."""
     if ecosystem == "pypi":
@@ -100,18 +98,26 @@ def _build_release_url(name: str, version: str, ecosystem: str) -> str:
 @click.version_option(__version__, prog_name="depvet")
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose logging")
 @click.option("--config", "-c", type=click.Path(), default=None, help="Path to depvet.toml")
+@click.option(
+    "--log-format",
+    type=click.Choice(["text", "json"]),
+    default="text",
+    help="Log output format (text or json)",
+)
 @click.pass_context
-def cli(ctx: click.Context, verbose: bool, config: Optional[str]) -> None:
+def cli(ctx: click.Context, verbose: bool, config: Optional[str], log_format: str) -> None:
     """DepVet — Software supply chain monitoring engine."""
-    _setup_logging(verbose)
+    _setup_logging(verbose, log_format)
     ctx.ensure_object(dict)
     from depvet.config.config import load_config
+
     ctx.obj["config"] = load_config(config)
 
 
 # ─────────────────────────────────────────────────────────────
 # depvet scan
 # ─────────────────────────────────────────────────────────────
+
 
 @cli.command()
 @click.argument("package")
@@ -180,7 +186,9 @@ async def _scan(config, package, old_version, new_version, ecosystem, json_outpu
             click.echo("✅ No differences found.")
             return
 
-        click.echo(f"  Diff: {stats.files_changed} files changed (+{stats.lines_added}/-{stats.lines_removed} lines), {len(chunks)} chunk(s)")
+        click.echo(
+            f"  Diff: {stats.files_changed} files changed (+{stats.lines_added}/-{stats.lines_removed} lines), {len(chunks)} chunk(s)"
+        )
 
         analyzer = _get_analyzer(config)
 
@@ -197,6 +205,7 @@ async def _scan(config, package, old_version, new_version, ecosystem, json_outpu
         click.echo("  Stage 2: Deep analysis...")
         # Fetch version transition context
         from depvet.analyzer.version_signal import get_transition_context
+
         version_ctx = None
         try:
             click.echo("  Fetching version transition signals...")
@@ -236,6 +245,7 @@ async def _scan(config, package, old_version, new_version, ecosystem, json_outpu
 # ─────────────────────────────────────────────────────────────
 # depvet diff
 # ─────────────────────────────────────────────────────────────
+
 
 @cli.command()
 @click.argument("package")
@@ -288,6 +298,7 @@ async def _diff(config, package, old_version, new_version, ecosystem, output):
 # depvet analyze
 # ─────────────────────────────────────────────────────────────
 
+
 @cli.command()
 @click.argument("diff_file", type=click.Path(exists=True))
 @click.option("--json", "json_output", is_flag=True)
@@ -334,7 +345,9 @@ async def _analyze(config, diff_file, json_output, package, old_version, new_ver
     )
 
     release = Release(
-        name=package, version=new_version, ecosystem=ecosystem,
+        name=package,
+        version=new_version,
+        ecosystem=ecosystem,
         previous_version=old_version,
         published_at=datetime.now(timezone.utc).isoformat(),
         url="",
@@ -347,6 +360,7 @@ async def _analyze(config, diff_file, json_output, package, old_version, new_ver
 # ─────────────────────────────────────────────────────────────
 # depvet monitor
 # ─────────────────────────────────────────────────────────────
+
 
 @cli.command()
 @click.option("--top", default=0, type=int, help="Monitor top N packages")
@@ -367,7 +381,81 @@ def monitor(ctx, top, sbom, interval, once, no_npm, no_pypi, no_analyze, slack):
     asyncio.run(_monitor(config, top, sbom, effective_interval, once, no_npm, no_pypi, no_analyze, slack))
 
 
+async def _preflight_checks(config, no_analyze: bool, slack: bool, sbom) -> None:
+    """Validate runtime environment before entering the monitor loop.
+
+    Raises SystemExit on hard errors; logs warnings for soft issues.
+    """
+    import aiohttp
+
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    # 1. LLM API key
+    if not no_analyze:
+        provider = config.llm.provider.lower()
+        if provider in ("claude", "anthropic"):
+            if not os.environ.get(config.llm.api_key_env):
+                errors.append(f"LLM API key not set: export {config.llm.api_key_env}")
+        elif provider == "openai":
+            if not os.environ.get(config.llm.api_key_env) and not os.environ.get("OPENAI_API_KEY"):
+                errors.append(f"OpenAI API key not set: export {config.llm.api_key_env} or OPENAI_API_KEY")
+        elif provider.startswith("vertex"):
+            if not os.environ.get("VERTEX_PROJECT_ID"):
+                errors.append("VERTEX_PROJECT_ID not set for Vertex AI provider")
+
+    # 2. Slack webhook
+    if slack:
+        url = os.environ.get(config.alert.slack_webhook_env)
+        if not url:
+            errors.append(f"Slack webhook not set: export {config.alert.slack_webhook_env}")
+
+    # 3. Webhook URL reachability
+    if config.alert.webhook_url:
+        try:
+            async with aiohttp.ClientSession() as session:
+                resp = await session.head(
+                    config.alert.webhook_url,
+                    timeout=aiohttp.ClientTimeout(total=5),
+                )
+                if resp.status >= 500:
+                    warnings.append(f"Webhook URL returned {resp.status}: {config.alert.webhook_url}")
+        except Exception as e:
+            warnings.append(f"Webhook URL unreachable: {config.alert.webhook_url} ({e})")
+
+    # 4. SBOM file existence
+    if sbom and not Path(sbom).exists():
+        errors.append(f"SBOM file not found: {sbom}")
+
+    # 5. State file writability
+    state_path = Path(config.state.path)
+    try:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(state_path, "a"):
+            pass
+    except OSError as e:
+        errors.append(f"State file not writable: {state_path} ({e})")
+
+    # Report
+    for w in warnings:
+        logger.warning(w)
+        click.echo(f"  ⚠️  {w}", err=True)
+
+    if errors:
+        for err_msg in errors:
+            logger.error(err_msg)
+            click.echo(f"  ❌ {err_msg}", err=True)
+        click.echo("\nPre-flight checks failed. Fix the errors above and retry.", err=True)
+        sys.exit(1)
+
+    if not warnings:
+        click.echo("  ✅ Pre-flight checks passed")
+
+
 async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyze, slack):
+    import signal
+    import time as _time
+
     from depvet.registry.pypi import PyPIMonitor
     from depvet.registry.npm import NpmMonitor
     from depvet.registry.go import GoModulesMonitor
@@ -379,11 +467,35 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
     from depvet.alert.stdout import StdoutAlerter
     from depvet.alert.slack import SlackAlerter
     from depvet.alert.webhook import WebhookAlerter
+    from depvet.alert.dlq import DeadLetterQueue
     from depvet.analyzer.triage import TriageAnalyzer
     from depvet.analyzer.deep import DeepAnalyzer
 
+    # --- Pre-flight checks ---
+    await _preflight_checks(config, no_analyze, slack, sbom)
+
+    # --- Graceful shutdown setup ---
+    shutdown_event = asyncio.Event()
+    releases_processed = 0
+    cycles_completed = 0
+    start_time = _time.monotonic()
+
+    def _request_shutdown(signame: str) -> None:
+        logger.info("Received %s, initiating graceful shutdown...", signame, extra={"signal": signame})
+        click.echo(f"\n  🛑 Received {signame}, finishing current batch...")
+        shutdown_event.set()
+
+    loop = asyncio.get_running_loop()
+    try:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, _request_shutdown, sig.name)
+    except NotImplementedError:
+        # Windows: only SIGINT via Ctrl+C
+        signal.signal(signal.SIGINT, lambda *_: _request_shutdown("SIGINT"))
+
     state = PollingState(config.state.path)
     wl = WatchlistManager()
+    dlq = DeadLetterQueue(path=config.alert.dlq_path)
 
     # Resolve watchlist sources: 'sbom' source needed for config sbom_path auto-import
     # CLI --sbom always overrides; config.watchlist.sbom_path only used if 'sbom' in sources
@@ -391,8 +503,8 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
     if not effective_sbom and "sbom" in config.watchlist.sources and config.watchlist.sbom_path:
         effective_sbom = config.watchlist.sbom_path
     if effective_sbom:
-        sbom_fmt = getattr(config.watchlist, 'sbom_format', None)
-        count = wl.import_from_sbom(effective_sbom, fmt=sbom_fmt if sbom_fmt != 'cyclonedx' else None)
+        sbom_fmt = getattr(config.watchlist, "sbom_format", None)
+        count = wl.import_from_sbom(effective_sbom, fmt=sbom_fmt if sbom_fmt != "cyclonedx" else None)
         click.echo(f"📋 Imported {count} packages from SBOM ({effective_sbom})")
 
     # Build monitor list from config.monitor.ecosystems + CLI flags
@@ -445,20 +557,21 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
     # Initial load if top_n is an active source or --top was passed
     if top > 0 or "top_n" in active_sources:
         await _refresh_top_n()
-        import time as _time
         _last_top_n_refresh = _time.monotonic()
 
     # Alert router
-    router = AlertRouter(min_severity=config.alert.min_severity)
+    router = AlertRouter(min_severity=config.alert.min_severity, dlq=dlq)
     router.register(StdoutAlerter())
     if slack:
         slack_webhook = os.environ.get(config.alert.slack_webhook_env)
         router.register(SlackAlerter(webhook_url=slack_webhook))
     if config.alert.webhook_url:
-        router.register(WebhookAlerter(
-            url=config.alert.webhook_url,
-            secret_env=config.alert.webhook_secret_env,
-        ))
+        router.register(
+            WebhookAlerter(
+                url=config.alert.webhook_url,
+                secret_env=config.alert.webhook_secret_env,
+            )
+        )
 
     analyzer = _get_analyzer(config) if not no_analyze else None
     # Semaphore: limits max concurrent analyses
@@ -469,10 +582,9 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
     click.echo(f"🚀 Starting monitor (interval={interval}s, ecosystems={[m.ecosystem for m in monitors]})")
     click.echo(f"   Watchlist: {wl.stats()}")
 
-    while True:
+    while not shutdown_event.is_set():
         # Refresh top-N if refresh_interval has elapsed
         if refresh_interval > 0 and (top > 0 or "top_n" in active_sources):
-            import time as _time
             if _time.monotonic() - _last_top_n_refresh >= refresh_interval:
                 click.echo("  🔄 Refreshing top-N watchlist...")
                 await _refresh_top_n()
@@ -491,18 +603,21 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
 
             since = state.get(eco)
             releases, new_state = await mon.get_new_releases(watchlist_set, since)
-            state.set(eco, new_state)
+            # NOTE: state.set() is deferred until after processing to avoid
+            # losing releases when batch is truncated by queue_max_size.
 
             if releases:
                 click.echo(f"  [{eco}] {len(releases)} new release(s)")
 
             async def _process_one(release, _eco=eco):
+                nonlocal releases_processed
                 click.echo(f"    📦 {release.name} {release.version}")
                 if no_analyze or not release.previous_version:
                     # Release-only notification: dispatch to alert backends without LLM analysis
                     from depvet.models.alert import AlertEvent
                     from depvet.models.verdict import Verdict, VerdictType, Severity, DiffStats
                     from datetime import datetime, timezone
+
                     notify_verdict = Verdict(
                         verdict=VerdictType.UNKNOWN,
                         severity=Severity.MEDIUM,  # visible by default min_severity
@@ -554,6 +669,7 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
 
                             # Fetch version transition context (same as scan path)
                             from depvet.analyzer.version_signal import get_transition_context
+
                             version_ctx = await get_transition_context(
                                 release.name,
                                 release.previous_version,
@@ -575,26 +691,59 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
 
                             event = AlertEvent(release=release, verdict=verdict)
                             await router.dispatch(event)
+                    releases_processed += 1
                 except Exception as e:
                     logger.error(f"Analysis failed for {release.name}: {e}")
 
             if releases:
                 # Apply batch limit: process at most _batch_limit releases per cycle
-                # (0 = unlimited)
+                # (0 = unlimited).  Truncated releases are NOT lost — state is only
+                # advanced when all releases are consumed, so overflow releases will
+                # be re-fetched on the next poll cycle.
+                truncated = 0 < _batch_limit < len(releases)
                 batch = releases if _batch_limit <= 0 else releases[:_batch_limit]
+                if truncated:
+                    click.echo(
+                        f"  ⚠️  [{eco}] {len(releases)} releases exceed "
+                        f"queue_max_size={_batch_limit}; processing {len(batch)}, "
+                        f"remaining {len(releases) - len(batch)} deferred to next cycle"
+                    )
                 tasks = [asyncio.create_task(_process_one(r)) for r in batch]
                 await asyncio.gather(*tasks)
+
+            # Only advance polling state when the full batch was consumed.
+            # If truncated, keep the old state so overflow releases are
+            # re-fetched on the next poll cycle.
+            if not releases or not (0 < _batch_limit < len(releases)):
+                state.set(eco, new_state)
+
+        cycles_completed += 1
 
         if once:
             break
 
         click.echo(f"  💤 Sleeping {interval}s...")
-        await asyncio.sleep(interval)
+        try:
+            await asyncio.wait_for(shutdown_event.wait(), timeout=interval)
+            break  # shutdown requested during sleep
+        except asyncio.TimeoutError:
+            pass  # normal: interval elapsed
+
+    # --- Shutdown summary ---
+    elapsed = _time.monotonic() - start_time
+    dlq_pending = dlq.count()
+    click.echo(
+        f"\n  ✅ Shutdown: {releases_processed} releases processed, "
+        f"{router.dispatched_count} alerts sent, {cycles_completed} cycle(s) in {elapsed:.0f}s"
+    )
+    if dlq_pending:
+        click.echo(f"  ⚠️  DLQ has {dlq_pending} pending entries (run `depvet dlq list`)")
 
 
 # ─────────────────────────────────────────────────────────────
 # depvet validate
 # ─────────────────────────────────────────────────────────────
+
 
 @cli.command()
 @click.option("--sbom", type=click.Path(exists=True), required=True)
@@ -642,15 +791,33 @@ async def _validate(sbom_path, sbom_format, check_osv, json_output):
 
     if json_output:
         import json as _json
+
         results = {
             "total_packages": len(entries),
             "issues_found": total_issues,
-            "local_db_hits": [{"name": h.name, "version": h.version, "ecosystem": h.ecosystem,
-                               "verdict": h.verdict, "severity": h.severity, "summary": h.summary}
-                              for h in local_hits],
-            "osv_hits": [{"name": h.name, "version": h.version, "ecosystem": h.ecosystem,
-                          "osv_id": h.osv_id, "severity": h.severity, "summary": h.summary}
-                         for hits in osv_hits.values() for h in hits],
+            "local_db_hits": [
+                {
+                    "name": h.name,
+                    "version": h.version,
+                    "ecosystem": h.ecosystem,
+                    "verdict": h.verdict,
+                    "severity": h.severity,
+                    "summary": h.summary,
+                }
+                for h in local_hits
+            ],
+            "osv_hits": [
+                {
+                    "name": h.name,
+                    "version": h.version,
+                    "ecosystem": h.ecosystem,
+                    "osv_id": h.osv_id,
+                    "severity": h.severity,
+                    "summary": h.summary,
+                }
+                for hits in osv_hits.values()
+                for h in hits
+            ],
         }
         click.echo(_json.dumps(results, indent=2, ensure_ascii=False))
         return
@@ -679,6 +846,7 @@ async def _validate(sbom_path, sbom_format, check_osv, json_output):
 # depvet watchlist
 # ─────────────────────────────────────────────────────────────
 
+
 @cli.group()
 @click.pass_context
 def watchlist(ctx):
@@ -692,6 +860,7 @@ def watchlist(ctx):
 def watchlist_import(ctx, sbom_path):
     """Import packages from a SBOM file."""
     from depvet.watchlist.manager import WatchlistManager
+
     wl = WatchlistManager()
     count = wl.import_from_sbom(sbom_path)
     click.echo(f"✅ Imported {count} packages from {sbom_path}")
@@ -699,8 +868,7 @@ def watchlist_import(ctx, sbom_path):
 
 @watchlist.command("add")
 @click.argument("name")
-@click.option("--ecosystem", "-e", default="pypi",
-              type=click.Choice(["pypi", "npm", "go", "cargo", "maven"]))
+@click.option("--ecosystem", "-e", default="pypi", type=click.Choice(["pypi", "npm", "go", "cargo", "maven"]))
 @click.pass_context
 def watchlist_add(ctx, name, ecosystem):
     """Add a package to the watchlist."""
@@ -711,6 +879,7 @@ def watchlist_add(ctx, name, ecosystem):
             err=True,
         )
     from depvet.watchlist.manager import WatchlistManager
+
     wl = WatchlistManager()
     wl.add(name, ecosystem)
     click.echo(f"✅ Added {ecosystem}/{name}")
@@ -718,12 +887,12 @@ def watchlist_add(ctx, name, ecosystem):
 
 @watchlist.command("remove")
 @click.argument("name")
-@click.option("--ecosystem", "-e", default="pypi",
-              type=click.Choice(["pypi", "npm", "go", "cargo", "maven"]))
+@click.option("--ecosystem", "-e", default="pypi", type=click.Choice(["pypi", "npm", "go", "cargo", "maven"]))
 @click.pass_context
 def watchlist_remove(ctx, name, ecosystem):
     """Remove a package from the watchlist."""
     from depvet.watchlist.manager import WatchlistManager
+
     wl = WatchlistManager()
     removed = wl.remove(name, ecosystem)
     if removed:
@@ -738,6 +907,7 @@ def watchlist_remove(ctx, name, ecosystem):
 def watchlist_list(ctx, ecosystem):
     """List watchlist packages."""
     from depvet.watchlist.manager import WatchlistManager
+
     wl = WatchlistManager()
     entries = wl.all_entries()
     if ecosystem:
@@ -764,11 +934,71 @@ def watchlist_list(ctx, ecosystem):
 def watchlist_stats(ctx):
     """Show watchlist statistics."""
     from depvet.watchlist.manager import WatchlistManager
+
     wl = WatchlistManager()
     s = wl.stats()
     click.echo(f"Total packages: {s['total']}")
     for eco, count in sorted(s["by_ecosystem"].items()):
         click.echo(f"  {eco}: {count}")
+
+
+# ─────────────────────────────────────────────────────────────
+# depvet dlq
+# ─────────────────────────────────────────────────────────────
+
+
+@cli.group()
+@click.pass_context
+def dlq(ctx):
+    """Manage the dead letter queue for failed alerts."""
+    pass
+
+
+@dlq.command("list")
+@click.pass_context
+def dlq_list(ctx):
+    """List pending DLQ entries."""
+    from depvet.alert.dlq import DeadLetterQueue
+
+    config = ctx.obj["config"]
+    q = DeadLetterQueue(path=config.alert.dlq_path)
+    entries = q.list_entries()
+    if not entries:
+        click.echo("DLQ is empty.")
+        return
+    for e in entries:
+        ev = e.get("event_data", {})
+        rel = ev.get("release", {})
+        click.echo(
+            f"  [{e.get('timestamp', '?')[:19]}] "
+            f"{e.get('alerter_type', '?')} — "
+            f"{rel.get('ecosystem', '?')}/{rel.get('name', '?')}@{rel.get('version', '?')} "
+            f"({e.get('error_message', '')[:60]})"
+        )
+    click.echo(f"\n  Total: {len(entries)} entries")
+
+
+@dlq.command("count")
+@click.pass_context
+def dlq_count(ctx):
+    """Show number of DLQ entries."""
+    from depvet.alert.dlq import DeadLetterQueue
+
+    config = ctx.obj["config"]
+    q = DeadLetterQueue(path=config.alert.dlq_path)
+    click.echo(f"DLQ entries: {q.count()}")
+
+
+@dlq.command("clear")
+@click.pass_context
+def dlq_clear(ctx):
+    """Clear all DLQ entries."""
+    from depvet.alert.dlq import DeadLetterQueue
+
+    config = ctx.obj["config"]
+    q = DeadLetterQueue(path=config.alert.dlq_path)
+    n = q.clear()
+    click.echo(f"Cleared {n} DLQ entries.")
 
 
 if __name__ == "__main__":

@@ -317,7 +317,6 @@ MALICIOUS_PATTERNS: list[dict] = [
         "description": "リバースシェルのパターンが検出された",
         "cwe": "CWE-78",
     },
-
     # ── Type 5: Intentional sabotage patterns ─────────────────────────────────
     # Mass file destruction: glob/walk + write/delete (node-ipc/peacenotwar)
     {
@@ -373,15 +372,14 @@ MALICIOUS_PATTERNS: list[dict] = [
         "description": "非ゼロ終了コードでのプロセス強制終了が追加された（クラッシュ注入の可能性）",
         "cwe": "CWE-400",
     },
-
 ] + _EXTENDED  # Type 7/8/10 patterns
 
 # Patterns that suggest a diff is likely benign (skip LLM)
 BENIGN_INDICATORS = [
-    re.compile(r"^[+\-]\s*#", re.MULTILINE),          # comment changes
-    re.compile(r"^[+\-]\s*\"\"\"", re.MULTILINE),      # docstring changes
-    re.compile(r"^[+\-]\s*version\s*=", re.MULTILINE), # version bumps
-    re.compile(r"^[+\-]\s*__version__", re.MULTILINE), # version string
+    re.compile(r"^[+\-]\s*#", re.MULTILINE),  # comment changes
+    re.compile(r"^[+\-]\s*\"\"\"", re.MULTILINE),  # docstring changes
+    re.compile(r"^[+\-]\s*version\s*=", re.MULTILINE),  # version bumps
+    re.compile(r"^[+\-]\s*__version__", re.MULTILINE),  # version string
 ]
 
 BENIGN_ONLY_PATTERNS = [
@@ -417,27 +415,26 @@ def scan_diff(diff_content: str, filepath: str = "") -> list[RuleMatch]:
     for pattern_def in MALICIOUS_PATTERNS:
         for m in pattern_def["pattern"].finditer(added_content):
             # Find which line this match is on
-            line_num = added_content[:m.start()].count("\n") + 1
+            line_num = added_content[: m.start()].count("\n") + 1
             actual_line = added_lines[line_num - 1][0] if line_num <= len(added_lines) else None
 
             evidence = m.group(0)[:50]
 
             # Avoid duplicate matches for same rule+line
-            existing = any(
-                r.rule_id == pattern_def["id"] and r.line_number == actual_line
-                for r in matches
-            )
+            existing = any(r.rule_id == pattern_def["id"] and r.line_number == actual_line for r in matches)
             if not existing:
-                matches.append(RuleMatch(
-                    rule_id=pattern_def["id"],
-                    category=pattern_def["category"],
-                    severity=pattern_def["severity"],
-                    description=pattern_def["description"],
-                    evidence=evidence,
-                    file=filepath,
-                    line_number=actual_line,
-                    cwe=pattern_def.get("cwe"),
-                ))
+                matches.append(
+                    RuleMatch(
+                        rule_id=pattern_def["id"],
+                        category=pattern_def["category"],
+                        severity=pattern_def["severity"],
+                        description=pattern_def["description"],
+                        evidence=evidence,
+                        file=filepath,
+                        line_number=actual_line,
+                        cwe=pattern_def.get("cwe"),
+                    )
+                )
 
     return matches
 
@@ -448,18 +445,21 @@ def is_likely_benign(diff_content: str) -> bool:
     Used to skip LLM triage for obviously safe changes.
     """
     added_lines = [
-        line[1:].strip()
-        for line in diff_content.splitlines()
-        if line.startswith("+") and not line.startswith("+++")
+        line[1:].strip() for line in diff_content.splitlines() if line.startswith("+") and not line.startswith("+++")
     ]
     if not added_lines:
         return True
 
     benign_count = sum(
-        1 for line in added_lines
-        if not line or line.startswith("#") or line.startswith('"""') or
-        line.startswith("'''") or re.match(r"^version\s*=", line, re.IGNORECASE) or
-        re.match(r"^__version__", line) or re.match(r"^#", line)
+        1
+        for line in added_lines
+        if not line
+        or line.startswith("#")
+        or line.startswith('"""')
+        or line.startswith("'''")
+        or re.match(r"^version\s*=", line, re.IGNORECASE)
+        or re.match(r"^__version__", line)
+        or re.match(r"^#", line)
     )
     return benign_count / len(added_lines) > 0.9
 
@@ -589,32 +589,34 @@ def scan_diff_windowed(diff_content: str, filepath: str = "") -> list[RuleMatch]
 
             # Avoid duplicate matches at same location
             actual_line = added_lines[i][0]
-            already = any(
-                r.rule_id == pattern_def["id"] and r.line_number == actual_line
-                for r in matches
-            )
+            already = any(r.rule_id == pattern_def["id"] and r.line_number == actual_line for r in matches)
             if already:
                 continue
 
             # Best evidence: the first matching line
             evidence = lines_only[i][:50]
-            matches.append(RuleMatch(
-                rule_id=pattern_def["id"],
-                category=pattern_def["category"],
-                severity=pattern_def["severity"],
-                description=pattern_def["description"],
-                evidence=evidence,
-                file=filepath,
-                line_number=actual_line,
-                cwe=pattern_def.get("cwe"),
-            ))
+            matches.append(
+                RuleMatch(
+                    rule_id=pattern_def["id"],
+                    category=pattern_def["category"],
+                    severity=pattern_def["severity"],
+                    description=pattern_def["description"],
+                    evidence=evidence,
+                    file=filepath,
+                    line_number=actual_line,
+                    cwe=pattern_def.get("cwe"),
+                )
+            )
 
     return matches
 
 
 SEVERITY_ORDER_RULES: dict = {
-    Severity.CRITICAL: 5, Severity.HIGH: 4,
-    Severity.MEDIUM: 3, Severity.LOW: 2, Severity.NONE: 1,
+    Severity.CRITICAL: 5,
+    Severity.HIGH: 4,
+    Severity.MEDIUM: 3,
+    Severity.LOW: 2,
+    Severity.NONE: 1,
 }
 
 
@@ -633,8 +635,7 @@ def scan_diff_full(diff_content: str, filepath: str = "") -> list[RuleMatch]:
     # remove lower-severity single-line hits for the same category (reduce noise)
     window_critical_cats = {m.category for m in window if m.severity == Severity.CRITICAL}
     filtered_single = [
-        m for m in single
-        if not (m.category in window_critical_cats and m.severity.value in ("LOW", "MEDIUM"))
+        m for m in single if not (m.category in window_critical_cats and m.severity.value in ("LOW", "MEDIUM"))
     ]
 
     combined = filtered_single + window

@@ -52,14 +52,20 @@ def test_diff_deleted_file():
 
 def test_diff_skip_test_files():
     with tempfile.TemporaryDirectory() as td:
-        old = _create_package(Path(td) / "old", {
-            "main.py": "pass\n",
-            "test_main.py": "pass\n",
-        })
-        new = _create_package(Path(td) / "new", {
-            "main.py": "changed\n",
-            "test_main.py": "changed tests\n",
-        })
+        old = _create_package(
+            Path(td) / "old",
+            {
+                "main.py": "pass\n",
+                "test_main.py": "pass\n",
+            },
+        )
+        new = _create_package(
+            Path(td) / "new",
+            {
+                "main.py": "changed\n",
+                "test_main.py": "changed tests\n",
+            },
+        )
         chunks, stats = generate_diff(old, new)
         # Chunks should NOT contain test files
         all_paths = [f.path for chunk in chunks for f in chunk.files]

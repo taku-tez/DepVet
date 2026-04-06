@@ -6,12 +6,12 @@ from depvet.models.verdict import Severity
 
 def make_diff(lines: list[str], filepath: str = "test.py") -> str:
     return "\n".join(
-        [f"--- a/{filepath}", f"+++ b/{filepath}", "@@ -1 +1,{len(lines)} @@"]
-        + [f"+{line}" for line in lines]
+        [f"--- a/{filepath}", f"+++ b/{filepath}", "@@ -1 +1,{len(lines)} @@"] + [f"+{line}" for line in lines]
     )
 
 
 # ─── Direct dangerous calls ───────────────────────────────────────────────────
+
 
 def test_detect_exec_call():
     diff = make_diff(["exec(payload)"])
@@ -34,6 +34,7 @@ def test_no_false_positive_print():
 
 
 # ─── getattr obfuscation ─────────────────────────────────────────────────────
+
 
 def test_detect_getattr_exec():
     diff = make_diff(["f = getattr(__builtins__, 'exec')"])
@@ -58,17 +59,21 @@ def test_no_false_positive_getattr_safe():
 
 # ─── Variable aliasing ────────────────────────────────────────────────────────
 
+
 def test_detect_aliased_exec():
-    diff = make_diff([
-        "e = exec",
-        "e(payload)",
-    ])
+    diff = make_diff(
+        [
+            "e = exec",
+            "e(payload)",
+        ]
+    )
     findings = ast_scan_diff(diff, "malware.py")
     ids = [f.finding_id for f in findings]
     assert "ALIASED_EXEC" in ids or "DIRECT_EXEC_EVAL" in ids
 
 
 # ─── Dynamic import ───────────────────────────────────────────────────────────
+
 
 def test_detect_dynamic_import_suspicious():
     diff = make_diff(["mod = __import__('subprocess')"])
@@ -84,6 +89,7 @@ def test_no_false_positive_dynamic_import_safe():
 
 
 # ─── atexit / threading ──────────────────────────────────────────────────────
+
 
 def test_detect_atexit_register():
     diff = make_diff(["atexit.register(lambda: exfiltrate())"])
@@ -101,38 +107,46 @@ def test_detect_threading_timer():
 
 # ─── Sandbox evasion ─────────────────────────────────────────────────────────
 
+
 def test_detect_ci_check():
-    diff = make_diff([
-        "if not os.environ.get('CI'):",
-        "    exec(payload)",
-    ])
+    diff = make_diff(
+        [
+            "if not os.environ.get('CI'):",
+            "    exec(payload)",
+        ]
+    )
     findings = ast_scan_diff(diff, "setup.py")
     ids = [f.finding_id for f in findings]
     assert "CI_SANDBOX_CHECK" in ids
 
 
 def test_detect_time_bomb():
-    diff = make_diff([
-        "import datetime",
-        "if datetime.date.today() > datetime.date(2026, 6, 1):",
-        "    exec(payload)",
-    ])
+    diff = make_diff(
+        [
+            "import datetime",
+            "if datetime.date.today() > datetime.date(2026, 6, 1):",
+            "    exec(payload)",
+        ]
+    )
     findings = ast_scan_diff(diff, "main.py")
     ids = [f.finding_id for f in findings]
     assert "TIME_BOMB_CHECK" in ids
 
 
 def test_detect_credential_file_check():
-    diff = make_diff([
-        "if os.path.exists(os.path.expanduser('~/.aws/credentials')):",
-        "    exfiltrate()",
-    ])
+    diff = make_diff(
+        [
+            "if os.path.exists(os.path.expanduser('~/.aws/credentials')):",
+            "    exfiltrate()",
+        ]
+    )
     findings = ast_scan_diff(diff, "util.py")
     ids = [f.finding_id for f in findings]
     assert "CREDENTIAL_FILE_CHECK" in ids
 
 
 # ─── Non-Python file ─────────────────────────────────────────────────────────
+
 
 def test_skip_non_python_file():
     diff = make_diff(["eval(payload)"], filepath="index.js")
@@ -142,11 +156,14 @@ def test_skip_non_python_file():
 
 # ─── Syntax error graceful degradation ───────────────────────────────────────
 
+
 def test_graceful_on_syntax_error():
-    diff = make_diff([
-        "def broken(",  # intentional syntax error
-        "exec(payload)",
-    ])
+    diff = make_diff(
+        [
+            "def broken(",  # intentional syntax error
+            "exec(payload)",
+        ]
+    )
     # Should not raise, should try per-line
     findings = ast_scan_diff(diff, "broken.py")
     # May or may not find anything, but should not crash
@@ -155,11 +172,14 @@ def test_graceful_on_syntax_error():
 
 # ─── Deduplication ────────────────────────────────────────────────────────────
 
+
 def test_deduplication():
-    diff = make_diff([
-        "exec(a)",
-        "exec(b)",  # same rule, different line — both should appear
-    ])
+    diff = make_diff(
+        [
+            "exec(a)",
+            "exec(b)",  # same rule, different line — both should appear
+        ]
+    )
     findings = ast_scan_diff(diff, "x.py")
     exec_findings = [f for f in findings if f.finding_id == "DIRECT_EXEC_EVAL"]
     # Should have 2 (different lines), not 1

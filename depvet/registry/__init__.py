@@ -7,6 +7,11 @@ from depvet.registry.maven import MavenMonitor
 from depvet.registry.state import PollingState
 
 __all__ = [
-    "BaseRegistryMonitor", "PyPIMonitor", "NpmMonitor",
-    "GoModulesMonitor", "CargoMonitor", "MavenMonitor", "PollingState",
+    "BaseRegistryMonitor",
+    "PyPIMonitor",
+    "NpmMonitor",
+    "GoModulesMonitor",
+    "CargoMonitor",
+    "MavenMonitor",
+    "PollingState",
 ]

@@ -27,7 +27,8 @@ def _load_prompt(name: str) -> str:
 def _safe_format(template: str, **kwargs: object) -> str:
     """Format prompt template replacing only known placeholders (safe for JSON examples)."""
     import re
-    pattern = re.compile(r'\{(' + '|'.join(re.escape(k) for k in kwargs) + r')\}')
+
+    pattern = re.compile(r"\{(" + "|".join(re.escape(k) for k in kwargs) + r")\}")
     return pattern.sub(lambda m: str(kwargs[m.group(1)]), template)
 
 
@@ -42,6 +43,7 @@ def _extract_json(text: str) -> dict:
 
 
 # ─── Claude on Vertex AI ─────────────────────────────────────────────────────
+
 
 class VertexClaudeAnalyzer(BaseAnalyzer):
     """
@@ -71,18 +73,16 @@ class VertexClaudeAnalyzer(BaseAnalyzer):
     ):
         try:
             import anthropic
+
             self._client = anthropic.AsyncAnthropicVertex(
                 project_id=project_id or os.environ["VERTEX_PROJECT_ID"],
                 region=region or os.environ.get("VERTEX_REGION", "us-east5"),
             )
         except ImportError:
-            raise ImportError(
-                "anthropic[vertex] package is required: pip install 'anthropic[vertex]'"
-            )
+            raise ImportError("anthropic[vertex] package is required: pip install 'anthropic[vertex]'")
         except KeyError as e:
             raise ValueError(
-                f"Missing required env var for Vertex AI: {e}. "
-                "Set VERTEX_PROJECT_ID and optionally VERTEX_REGION."
+                f"Missing required env var for Vertex AI: {e}. Set VERTEX_PROJECT_ID and optionally VERTEX_REGION."
             )
 
         self.model = model
@@ -103,7 +103,8 @@ class VertexClaudeAnalyzer(BaseAnalyzer):
         old_version: str,
         new_version: str,
     ) -> tuple[bool, str]:
-        prompt = _safe_format(self._triage_template,
+        prompt = _safe_format(
+            self._triage_template,
             package_name=package_name,
             old_version=old_version,
             new_version=new_version,
@@ -115,7 +116,7 @@ class VertexClaudeAnalyzer(BaseAnalyzer):
                 max_tokens=256,
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = response.content[0].text if response.content else "{}"
+            text = getattr(response.content[0], "text", "{}") if response.content else "{}"
             data = _extract_json(text)
             return bool(data.get("should_analyze", True)), data.get("reason", "")
         except Exception as e:
@@ -132,9 +133,7 @@ class VertexClaudeAnalyzer(BaseAnalyzer):
         new_version: str,
         ecosystem: str,
     ) -> dict:
-        template = (
-            self._deep_npm_template if ecosystem == "npm" else self._deep_template
-        )
+        template = self._deep_npm_template if ecosystem == "npm" else self._deep_template
         # Build pre-analysis context (same as ClaudeAnalyzer)
         pre_context_parts = []
         import_sigs = analyze_imports(chunk.content)
@@ -157,7 +156,8 @@ class VertexClaudeAnalyzer(BaseAnalyzer):
                 pre_context_parts.append("\n".join(lines))
         pre_analysis_context = ("\n\n".join(pre_context_parts) + "\n") if pre_context_parts else ""
 
-        prompt = _safe_format(template,
+        prompt = _safe_format(
+            template,
             chunk_index=chunk_index + 1,
             total_chunks=total_chunks,
             package_name=package_name,
@@ -173,7 +173,7 @@ class VertexClaudeAnalyzer(BaseAnalyzer):
                 max_tokens=self.max_tokens,
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = response.content[0].text if response.content else "{}"
+            text = getattr(response.content[0], "text", "{}") if response.content else "{}"
             return _extract_json(text)
         except Exception as e:
             logger.error(f"Vertex Claude deep analysis failed: {e}")
@@ -181,6 +181,7 @@ class VertexClaudeAnalyzer(BaseAnalyzer):
 
 
 # ─── Gemini on Vertex AI ──────────────────────────────────────────────────────
+
 
 class VertexGeminiAnalyzer(BaseAnalyzer):
     """
@@ -210,20 +211,18 @@ class VertexGeminiAnalyzer(BaseAnalyzer):
         try:
             import vertexai
             from vertexai.generative_models import GenerativeModel, GenerationConfig
+
             self._GenerativeModel = GenerativeModel
             self._GenerationConfig = GenerationConfig
 
             proj = project_id or os.environ.get("VERTEX_PROJECT_ID")
             loc = region or os.environ.get("VERTEX_REGION", "us-central1")
             if not proj:
-                raise ValueError(
-                    "VERTEX_PROJECT_ID env var is required for Gemini on Vertex AI"
-                )
+                raise ValueError("VERTEX_PROJECT_ID env var is required for Gemini on Vertex AI")
             vertexai.init(project=proj, location=loc)
         except ImportError:
             raise ImportError(
-                "google-cloud-aiplatform is required: "
-                "pip install 'google-cloud-aiplatform[generativeai]'"
+                "google-cloud-aiplatform is required: pip install 'google-cloud-aiplatform[generativeai]'"
             )
 
         self.model = model
@@ -240,6 +239,7 @@ class VertexGeminiAnalyzer(BaseAnalyzer):
     async def _call(self, model_name: str, prompt: str, max_tokens: int) -> str:
         """Call Gemini synchronously (SDK is not async-native)."""
         import asyncio
+
         loop = asyncio.get_running_loop()
 
         def _sync():
@@ -257,7 +257,8 @@ class VertexGeminiAnalyzer(BaseAnalyzer):
         old_version: str,
         new_version: str,
     ) -> tuple[bool, str]:
-        prompt = _safe_format(self._triage_template,
+        prompt = _safe_format(
+            self._triage_template,
             package_name=package_name,
             old_version=old_version,
             new_version=new_version,
@@ -281,9 +282,7 @@ class VertexGeminiAnalyzer(BaseAnalyzer):
         new_version: str,
         ecosystem: str,
     ) -> dict:
-        template = (
-            self._deep_npm_template if ecosystem == "npm" else self._deep_template
-        )
+        template = self._deep_npm_template if ecosystem == "npm" else self._deep_template
         # Build pre-analysis context
         pre_context_parts = []
         import_sigs = analyze_imports(chunk.content)
@@ -306,7 +305,8 @@ class VertexGeminiAnalyzer(BaseAnalyzer):
                 pre_context_parts.append("\n".join(lines))
         pre_analysis_context = ("\n\n".join(pre_context_parts) + "\n") if pre_context_parts else ""
 
-        prompt = _safe_format(template,
+        prompt = _safe_format(
+            template,
             chunk_index=chunk_index + 1,
             total_chunks=total_chunks,
             package_name=package_name,

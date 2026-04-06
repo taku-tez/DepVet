@@ -11,11 +11,11 @@ from depvet.analyzer.dep_extractor import (
 
 # ─── npm / package.json ───────────────────────────────────────────────────────
 
+
 def make_pkg_diff(added_lines: list[str]) -> str:
     """Create a minimal package.json diff."""
     return "\n".join(
-        ["--- a/package.json", "+++ b/package.json", "@@ -1,5 +1,6 @@"]
-        + [f"+{line}" for line in added_lines]
+        ["--- a/package.json", "+++ b/package.json", "@@ -1,5 +1,6 @@"] + [f"+{line}" for line in added_lines]
     )
 
 
@@ -26,10 +26,12 @@ class TestNpmDeps:
         assert any(d.name == "plain-crypto-js" and d.version_spec == "^4.2.1" for d in deps)
 
     def test_detect_multiple_new_deps(self):
-        diff = make_pkg_diff([
-            '"evil-pkg": "1.0.0"',
-            '"another-bad": "^2.0.0"',
-        ])
+        diff = make_pkg_diff(
+            [
+                '"evil-pkg": "1.0.0"',
+                '"another-bad": "^2.0.0"',
+            ]
+        )
         deps = _extract_npm_deps(diff, "package.json")
         names = [d.name for d in deps]
         assert "evil-pkg" in names
@@ -41,25 +43,29 @@ class TestNpmDeps:
         assert any(d.name == "@evil/payload" for d in deps)
 
     def test_dev_dependency_flagged(self):
-        diff = "\n".join([
-            "--- a/package.json",
-            "+++ b/package.json",
-            "@@ -1,5 +1,7 @@",
-            ' "devDependencies": {',
-            '+"evil-dev": "^1.0.0"',
-        ])
+        diff = "\n".join(
+            [
+                "--- a/package.json",
+                "+++ b/package.json",
+                "@@ -1,5 +1,7 @@",
+                ' "devDependencies": {',
+                '+"evil-dev": "^1.0.0"',
+            ]
+        )
         deps = _extract_npm_deps(diff, "package.json")
         dev_deps = [d for d in deps if d.name == "evil-dev"]
         assert dev_deps
         assert dev_deps[0].is_dev is True
 
     def test_removed_dep_not_detected(self):
-        diff = "\n".join([
-            "--- a/package.json",
-            "+++ b/package.json",
-            "@@ -1,5 +1,4 @@",
-            '-"old-package": "^1.0.0"',
-        ])
+        diff = "\n".join(
+            [
+                "--- a/package.json",
+                "+++ b/package.json",
+                "@@ -1,5 +1,4 @@",
+                '-"old-package": "^1.0.0"',
+            ]
+        )
         deps = _extract_npm_deps(diff, "package.json")
         assert not any(d.name == "old-package" for d in deps)
 
@@ -70,16 +76,18 @@ class TestNpmDeps:
 
     def test_axios_attack_pattern(self):
         """Reproduces the axios 2026-03-30 attack: plain-crypto-js injected."""
-        diff = "\n".join([
-            "--- a/package.json",
-            "+++ b/package.json",
-            "@@ -8,6 +8,7 @@",
-            '   "dependencies": {',
-            '     "follow-redirects": "^1.15.4",',
-            '+    "plain-crypto-js": "^4.2.1",',
-            '     "proxy-from-env": "^1.1.0"',
-            '   }',
-        ])
+        diff = "\n".join(
+            [
+                "--- a/package.json",
+                "+++ b/package.json",
+                "@@ -8,6 +8,7 @@",
+                '   "dependencies": {',
+                '     "follow-redirects": "^1.15.4",',
+                '+    "plain-crypto-js": "^4.2.1",',
+                '     "proxy-from-env": "^1.1.0"',
+                "   }",
+            ]
+        )
         deps = _extract_npm_deps(diff, "package.json")
         malicious = [d for d in deps if d.name == "plain-crypto-js"]
         assert malicious
@@ -89,10 +97,10 @@ class TestNpmDeps:
 
 # ─── PyPI / pyproject.toml ────────────────────────────────────────────────────
 
+
 def make_toml_diff(added_lines: list[str]) -> str:
     return "\n".join(
-        ["--- a/pyproject.toml", "+++ b/pyproject.toml", "@@ -1,5 +1,6 @@",
-         " [project]", " dependencies = ["]
+        ["--- a/pyproject.toml", "+++ b/pyproject.toml", "@@ -1,5 +1,6 @@", " [project]", " dependencies = ["]
         + [f"+{line}" for line in added_lines]
         + [" ]"]
     )
@@ -121,18 +129,21 @@ class TestPyPIDeps:
         assert not deps
 
     def test_requirements_txt_style(self):
-        diff = "\n".join([
-            "--- a/requirements.txt",
-            "+++ b/requirements.txt",
-            "@@ -1,2 +1,3 @@",
-            " requests==2.31.0",
-            "+malicious-pkg==1.0.0",
-        ])
+        diff = "\n".join(
+            [
+                "--- a/requirements.txt",
+                "+++ b/requirements.txt",
+                "@@ -1,2 +1,3 @@",
+                " requests==2.31.0",
+                "+malicious-pkg==1.0.0",
+            ]
+        )
         deps = _extract_pypi_deps(diff, "requirements.txt")
         assert any(d.name == "malicious-pkg" for d in deps)
 
 
 # ─── Unified extractor ────────────────────────────────────────────────────────
+
 
 class TestExtractNewDependencies:
     def test_routes_to_npm_for_package_json(self):
@@ -151,6 +162,7 @@ class TestExtractNewDependencies:
 
 
 # ─── deps_to_watchlist_entries ────────────────────────────────────────────────
+
 
 class TestDepsToWatchlistEntries:
     def test_known_safe_filtered(self):
@@ -184,9 +196,11 @@ class TestDepsToWatchlistEntries:
 
 # ─── Known-bad DB integration ─────────────────────────────────────────────────
 
+
 class TestKnownBadLookup:
     def test_axios_1141_in_db(self):
         from depvet.known_bad.database import KnownBadDB
+
         db = KnownBadDB()
         hit = db.lookup("axios", "1.14.1", "npm")
         assert hit is not None
@@ -195,6 +209,7 @@ class TestKnownBadLookup:
 
     def test_axios_0304_in_db(self):
         from depvet.known_bad.database import KnownBadDB
+
         db = KnownBadDB()
         hit = db.lookup("axios", "0.30.4", "npm")
         assert hit is not None
@@ -202,6 +217,7 @@ class TestKnownBadLookup:
 
     def test_plain_crypto_js_in_db(self):
         from depvet.known_bad.database import KnownBadDB
+
         db = KnownBadDB()
         hit = db.lookup("plain-crypto-js", "4.2.1", "npm")
         assert hit is not None
@@ -210,6 +226,7 @@ class TestKnownBadLookup:
 
     def test_axios_safe_versions_not_in_db(self):
         from depvet.known_bad.database import KnownBadDB
+
         db = KnownBadDB()
         # Safe versions should NOT be in Known-bad DB
         assert db.lookup("axios", "1.6.0", "npm") is None

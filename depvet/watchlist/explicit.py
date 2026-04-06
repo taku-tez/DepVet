@@ -26,10 +26,7 @@ class ExplicitSource:
 
     def remove(self, name: str, ecosystem: str = "pypi") -> bool:
         before = len(self._entries)
-        self._entries = [
-            e for e in self._entries
-            if not (e.name == name and e.ecosystem == ecosystem)
-        ]
+        self._entries = [e for e in self._entries if not (e.name == name and e.ecosystem == ecosystem)]
         return len(self._entries) < before
 
     def entries(self, ecosystem: str | None = None) -> list[WatchlistEntry]:

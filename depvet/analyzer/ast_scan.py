@@ -35,6 +35,7 @@ from depvet.models.verdict import FindingCategory, Severity
 @dataclass
 class ASTFinding:
     """A finding from AST-level analysis."""
+
     finding_id: str
     severity: Severity
     category: FindingCategory
@@ -46,33 +47,72 @@ class ASTFinding:
 
 # ─── Dangerous names and modules ─────────────────────────────────────────────
 
-DANGEROUS_CALLS = frozenset({
-    "exec", "eval", "compile",
-    "execfile",  # Python 2 compat
-    # Note: __import__ is handled by DYNAMIC_IMPORT_SUSPICIOUS check, not here
-})
+DANGEROUS_CALLS = frozenset(
+    {
+        "exec",
+        "eval",
+        "compile",
+        "execfile",  # Python 2 compat
+        # Note: __import__ is handled by DYNAMIC_IMPORT_SUSPICIOUS check, not here
+    }
+)
 
-DANGEROUS_ATTRS = frozenset({
-    "system", "popen", "execvp", "execl", "execle",  # os
-    "call", "run", "Popen", "check_output",            # subprocess
-    "urlopen", "urlretrieve",                          # urllib
-    "b64decode", "decodebytes",                        # base64
-    "loads",                                           # pickle/json (pickle.loads = dangerous)
-})
+DANGEROUS_ATTRS = frozenset(
+    {
+        "system",
+        "popen",
+        "execvp",
+        "execl",
+        "execle",  # os
+        "call",
+        "run",
+        "Popen",
+        "check_output",  # subprocess
+        "urlopen",
+        "urlretrieve",  # urllib
+        "b64decode",
+        "decodebytes",  # base64
+        "loads",  # pickle/json (pickle.loads = dangerous)
+    }
+)
 
-NETWORK_CALLS = frozenset({
-    "urlopen", "urlretrieve", "get", "post", "put", "connect",
-    "request", "Request", "send",
-})
+NETWORK_CALLS = frozenset(
+    {
+        "urlopen",
+        "urlretrieve",
+        "get",
+        "post",
+        "put",
+        "connect",
+        "request",
+        "Request",
+        "send",
+    }
+)
 
-SUSPICIOUS_MODULES = frozenset({
-    "base64", "socket", "subprocess", "urllib", "urllib.request",
-    "http", "ctypes", "marshal", "atexit", "threading",
-    "codecs", "zlib", "gzip", "pickle", "shelve",
-})
+SUSPICIOUS_MODULES = frozenset(
+    {
+        "base64",
+        "socket",
+        "subprocess",
+        "urllib",
+        "urllib.request",
+        "http",
+        "ctypes",
+        "marshal",
+        "atexit",
+        "threading",
+        "codecs",
+        "zlib",
+        "gzip",
+        "pickle",
+        "shelve",
+    }
+)
 
 
 # ─── AST visitor ─────────────────────────────────────────────────────────────
+
 
 class MaliciousPatternVisitor(ast.NodeVisitor):
     """Visits an AST and collects suspicious patterns."""
@@ -82,21 +122,31 @@ class MaliciousPatternVisitor(ast.NodeVisitor):
         self._assigned_dangerous: dict[str, str] = {}  # varname → what it aliases
         self._env_vars_read: list[int] = []  # line numbers where env vars were read
 
-    def _add(self, finding_id: str, sev: Severity, cat: FindingCategory,
-             desc: str, line: Optional[int], evidence: str, cwe: str = "CWE-506"):
+    def _add(
+        self,
+        finding_id: str,
+        sev: Severity,
+        cat: FindingCategory,
+        desc: str,
+        line: Optional[int],
+        evidence: str,
+        cwe: str = "CWE-506",
+    ):
         # Deduplicate
         for f in self.findings:
             if f.finding_id == finding_id and f.line_number == line:
                 return
-        self.findings.append(ASTFinding(
-            finding_id=finding_id,
-            severity=sev,
-            category=cat,
-            description=desc,
-            line_number=line,
-            evidence=evidence,
-            cwe=cwe,
-        ))
+        self.findings.append(
+            ASTFinding(
+                finding_id=finding_id,
+                severity=sev,
+                category=cat,
+                description=desc,
+                line_number=line,
+                evidence=evidence,
+                cwe=cwe,
+            )
+        )
 
     def visit_Call(self, node: ast.Call):
         """Check function calls for dangerous patterns."""
@@ -115,8 +165,7 @@ class MaliciousPatternVisitor(ast.NodeVisitor):
             )
 
         # Pattern 2: getattr(obj, 'dangerous_name') — obfuscated attribute access
-        if (isinstance(node.func, ast.Name) and node.func.id == "getattr"
-                and len(node.args) >= 2):
+        if isinstance(node.func, ast.Name) and node.func.id == "getattr" and len(node.args) >= 2:
             attr_arg = node.args[1]
             if isinstance(attr_arg, ast.Constant) and isinstance(attr_arg.value, str):
                 attr_name = attr_arg.value
@@ -132,8 +181,7 @@ class MaliciousPatternVisitor(ast.NodeVisitor):
                     )
 
         # Pattern 3: __import__('suspicious_module')
-        if (isinstance(node.func, ast.Name) and node.func.id == "__import__"
-                and node.args):
+        if isinstance(node.func, ast.Name) and node.func.id == "__import__" and node.args:
             mod_arg = node.args[0]
             if isinstance(mod_arg, ast.Constant) and isinstance(mod_arg.value, str):
                 mod = mod_arg.value
@@ -162,9 +210,12 @@ class MaliciousPatternVisitor(ast.NodeVisitor):
             )
 
         # Pattern 5: atexit.register(lambda: ...) with network
-        if (isinstance(node.func, ast.Attribute) and node.func.attr == "register"
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "atexit"):
+        if (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr == "register"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "atexit"
+        ):
             self._add(
                 "ATEXIT_REGISTER",
                 Severity.HIGH,
@@ -176,9 +227,12 @@ class MaliciousPatternVisitor(ast.NodeVisitor):
             )
 
         # Pattern 6: threading.Timer(...) — delayed execution
-        if (isinstance(node.func, ast.Attribute) and node.func.attr == "Timer"
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "threading"):
+        if (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr == "Timer"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "threading"
+        ):
             self._add(
                 "THREADING_TIMER",
                 Severity.MEDIUM,
@@ -201,14 +255,12 @@ class MaliciousPatternVisitor(ast.NodeVisitor):
 
         # Pattern: e = getattr(builtins, 'exec')
         if isinstance(node.value, ast.Call):
-            if (isinstance(node.value.func, ast.Name)
-                    and node.value.func.id == "getattr"
-                    and len(node.value.args) >= 2):
+            if isinstance(node.value.func, ast.Name) and node.value.func.id == "getattr" and len(node.value.args) >= 2:
                 attr = node.value.args[1]
                 if isinstance(attr, ast.Constant) and attr.value in DANGEROUS_CALLS:
                     for target in node.targets:
                         if isinstance(target, ast.Name):
-                            self._assigned_dangerous[target.id] = attr.value
+                            self._assigned_dangerous[target.id] = str(attr.value)
 
         self.generic_visit(node)
 
@@ -218,8 +270,7 @@ class MaliciousPatternVisitor(ast.NodeVisitor):
 
         # Pattern: if not os.environ.get('CI') or similar CI checks
         src = ast.unparse(node.test) if hasattr(ast, "unparse") else ""
-        ci_vars = ["CI", "GITHUB_ACTIONS", "TRAVIS", "JENKINS", "CIRCLECI",
-                   "GITLAB_CI", "TF_BUILD", "BUILDKITE"]
+        ci_vars = ["CI", "GITHUB_ACTIONS", "TRAVIS", "JENKINS", "CIRCLECI", "GITLAB_CI", "TF_BUILD", "BUILDKITE"]
         if any(ci in src for ci in ci_vars):
             self._add(
                 "CI_SANDBOX_CHECK",
@@ -306,6 +357,7 @@ def ast_scan_diff(diff_content: str, filepath: str = "") -> list[ASTFinding]:
         py_extensions = (".py", ".pyw")
         # If filepath has an extension that is NOT Python, skip
         import os as _os
+
         _, ext = _os.path.splitext(filepath)
         if ext and ext.lower() not in py_extensions:
             return []

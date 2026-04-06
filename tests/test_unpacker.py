@@ -73,6 +73,7 @@ def create_crate(dest: Path, files: dict[str, str]) -> Path:
 
 # ─── ZIP / Wheel ──────────────────────────────────────────────────────────────
 
+
 def test_unpack_zip():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -85,23 +86,30 @@ def test_unpack_zip():
 def test_unpack_wheel():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        archive = create_wheel(tmp, {
-            "mypkg/__init__.py": "x = 1",
-            "mypkg/auth.py": "pass",
-        })
+        archive = create_wheel(
+            tmp,
+            {
+                "mypkg/__init__.py": "x = 1",
+                "mypkg/auth.py": "pass",
+            },
+        )
         out = unpack(archive, tmp / "out")
         assert (out / "mypkg" / "__init__.py").exists()
 
 
 # ─── Tarball (sdist) ─────────────────────────────────────────────────────────
 
+
 def test_unpack_sdist_tarball():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        archive = create_tarball(tmp, {
-            "mypkg-1.0.0/setup.py": "from setuptools import setup; setup()",
-            "mypkg-1.0.0/mypkg/__init__.py": "x = 1",
-        })
+        archive = create_tarball(
+            tmp,
+            {
+                "mypkg-1.0.0/setup.py": "from setuptools import setup; setup()",
+                "mypkg-1.0.0/mypkg/__init__.py": "x = 1",
+            },
+        )
         out = unpack(archive, tmp / "out")
         # Files should exist under out/
         found = list(out.rglob("setup.py"))
@@ -110,13 +118,17 @@ def test_unpack_sdist_tarball():
 
 # ─── npm tarball (package/ prefix) ───────────────────────────────────────────
 
+
 def test_unpack_npm_tarball_strips_package_prefix():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        archive = create_npm_tarball(tmp, {
-            "index.js": "module.exports = {}",
-            "package.json": '{"name": "mypkg"}',
-        })
+        archive = create_npm_tarball(
+            tmp,
+            {
+                "index.js": "module.exports = {}",
+                "package.json": '{"name": "mypkg"}',
+            },
+        )
         out = unpack(archive, tmp / "out")
         # 'package/' prefix should be stripped
         assert (out / "index.js").exists() or list(out.rglob("index.js"))
@@ -124,19 +136,24 @@ def test_unpack_npm_tarball_strips_package_prefix():
 
 # ─── Cargo .crate ─────────────────────────────────────────────────────────────
 
+
 def test_unpack_cargo_crate():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        archive = create_crate(tmp, {
-            "Cargo.toml": '[package]\nname = "mypkg"',
-            "src/lib.rs": "pub fn hello() {}",
-        })
+        archive = create_crate(
+            tmp,
+            {
+                "Cargo.toml": '[package]\nname = "mypkg"',
+                "src/lib.rs": "pub fn hello() {}",
+            },
+        )
         out = unpack(archive, tmp / "out")
         found = list(out.rglob("Cargo.toml"))
         assert len(found) > 0
 
 
 # ─── Error handling ───────────────────────────────────────────────────────────
+
 
 def test_unpack_unsupported_format():
     with tempfile.TemporaryDirectory() as td:

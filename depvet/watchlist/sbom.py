@@ -13,13 +13,14 @@ from depvet.watchlist.explicit import WatchlistEntry
 
 logger = logging.getLogger(__name__)
 
-PURL_RE = re.compile(
-    r"pkg:(?P<ecosystem>[^/]+)/(?:(?P<namespace>[^/]+)/)?(?P<name>[^@?#]+)(?:@(?P<version>[^?#]+))?"
-)
+PURL_RE = re.compile(r"pkg:(?P<ecosystem>[^/]+)/(?:(?P<namespace>[^/]+)/)?(?P<name>[^@?#]+)(?:@(?P<version>[^?#]+))?")
 
 ECO_MAP = {
-    "pypi": "pypi", "npm": "npm", "golang": "go",
-    "cargo": "cargo", "maven": "maven",
+    "pypi": "pypi",
+    "npm": "npm",
+    "golang": "go",
+    "cargo": "cargo",
+    "maven": "maven",
 }
 
 
@@ -134,11 +135,16 @@ class SBOMParser:
 
     def _parse_cyclonedx_xml(self, content: str) -> list[WatchlistEntry]:
         import xml.etree.ElementTree as ET
+
         entries = []
         try:
-            root = ET.fromstring(content)
-            for ns_uri in ["http://cyclonedx.org/schema/bom/1.4", "http://cyclonedx.org/schema/bom/1.3",
-                           "http://cyclonedx.org/schema/bom/1.5", ""]:
+            root = ET.fromstring(content)  # nosec B314 — SBOM XML from local file
+            for ns_uri in [
+                "http://cyclonedx.org/schema/bom/1.4",
+                "http://cyclonedx.org/schema/bom/1.3",
+                "http://cyclonedx.org/schema/bom/1.5",
+                "",
+            ]:
                 prefix = f"{{{ns_uri}}}" if ns_uri else ""
                 components = root.findall(f".//{prefix}component")
                 if components:
@@ -157,7 +163,7 @@ class SBOMParser:
                             name = name_el.text
                             version = ver_el.text if ver_el is not None else ""
                             group = grp_el.text if grp_el is not None else ""
-                            entry = _infer_fallback_entry(name=name, version=version, group=group)
+                            entry = _infer_fallback_entry(name=name, version=version or "", group=group or "")
                             if entry:
                                 entries.append(entry)
                     break
@@ -168,9 +174,10 @@ class SBOMParser:
     def _parse_spdx_xml(self, content: str) -> list[WatchlistEntry]:
         """Parse SPDX XML format."""
         import xml.etree.ElementTree as ET
+
         entries = []
         try:
-            root = ET.fromstring(content)
+            root = ET.fromstring(content)  # nosec B314 — SBOM XML from local file
             # SPDX XML namespaces vary — try common ones
             for ns_uri in [
                 "http://spdx.org/spdx/v2.3/document",
@@ -187,7 +194,9 @@ class SBOMParser:
                     for ref in pkg.findall(f"{prefix}externalRef") or pkg.findall(".//externalRef"):
                         ref_type = ref.findtext(f"{prefix}referenceType") or ref.findtext("referenceType") or ""
                         if "purl" in ref_type.lower():
-                            locator = ref.findtext(f"{prefix}referenceLocator") or ref.findtext("referenceLocator") or ""
+                            locator = (
+                                ref.findtext(f"{prefix}referenceLocator") or ref.findtext("referenceLocator") or ""
+                            )
                             if locator:
                                 entry = _parse_purl(locator)
                                 if entry:

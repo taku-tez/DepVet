@@ -29,33 +29,49 @@ def test_lookup_clean():
 def test_add_entry():
     db = KnownBadDB()
     initial = db.count()
-    db.add(KnownBadEntry(
-        name="evil-pkg",
-        version="1.0.0",
-        ecosystem="pypi",
-        verdict="MALICIOUS",
-        severity="HIGH",
-        summary="Test entry",
-        source="manual",
-        reported_at="2026-01-01",
-    ))
+    db.add(
+        KnownBadEntry(
+            name="evil-pkg",
+            version="1.0.0",
+            ecosystem="pypi",
+            verdict="MALICIOUS",
+            severity="HIGH",
+            summary="Test entry",
+            source="manual",
+            reported_at="2026-01-01",
+        )
+    )
     assert db.count() == initial + 1
     assert db.lookup("evil-pkg", "1.0.0", "pypi") is not None
 
 
 def test_no_duplicate_add():
     db = KnownBadDB()
-    db.add(KnownBadEntry(
-        name="test-dup", version="1.0.0", ecosystem="npm",
-        verdict="SUSPICIOUS", severity="MEDIUM", summary="Dup test",
-        source="manual", reported_at="2026-01-01",
-    ))
+    db.add(
+        KnownBadEntry(
+            name="test-dup",
+            version="1.0.0",
+            ecosystem="npm",
+            verdict="SUSPICIOUS",
+            severity="MEDIUM",
+            summary="Dup test",
+            source="manual",
+            reported_at="2026-01-01",
+        )
+    )
     count1 = db.count()
-    db.add(KnownBadEntry(
-        name="test-dup", version="1.0.0", ecosystem="npm",
-        verdict="SUSPICIOUS", severity="MEDIUM", summary="Dup test",
-        source="manual", reported_at="2026-01-01",
-    ))
+    db.add(
+        KnownBadEntry(
+            name="test-dup",
+            version="1.0.0",
+            ecosystem="npm",
+            verdict="SUSPICIOUS",
+            severity="MEDIUM",
+            summary="Dup test",
+            source="manual",
+            reported_at="2026-01-01",
+        )
+    )
     assert db.count() == count1
 
 
@@ -65,11 +81,18 @@ def test_save_and_reload():
 
     try:
         db = KnownBadDB(db_path=path)
-        db.add(KnownBadEntry(
-            name="test-save", version="2.0.0", ecosystem="pypi",
-            verdict="MALICIOUS", severity="CRITICAL", summary="Save test",
-            source="manual", reported_at="2026-04-01",
-        ))
+        db.add(
+            KnownBadEntry(
+                name="test-save",
+                version="2.0.0",
+                ecosystem="pypi",
+                verdict="MALICIOUS",
+                severity="CRITICAL",
+                summary="Save test",
+                source="manual",
+                reported_at="2026-04-01",
+            )
+        )
         db.save(path)
 
         db2 = KnownBadDB(db_path=path)

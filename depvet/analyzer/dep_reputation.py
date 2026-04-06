@@ -39,36 +39,37 @@ logger = logging.getLogger(__name__)
 # ─── Thresholds ─────────────────────────────────────────────────────────────
 
 # Age thresholds (days since first publish)
-AGE_CRITICAL_DAYS = 7     # Published within a week → CRITICAL
-AGE_HIGH_DAYS = 30        # Published within a month → HIGH
-AGE_MEDIUM_DAYS = 90      # Published within 3 months → MEDIUM
+AGE_CRITICAL_DAYS = 7  # Published within a week → CRITICAL
+AGE_HIGH_DAYS = 30  # Published within a month → HIGH
+AGE_MEDIUM_DAYS = 90  # Published within 3 months → MEDIUM
 
 # Weekly download thresholds (absolute)
-DOWNLOADS_HIGH_THRESHOLD = 100      # < 100/week → HIGH flag
+DOWNLOADS_HIGH_THRESHOLD = 100  # < 100/week → HIGH flag
 DOWNLOADS_MEDIUM_THRESHOLD = 1_000  # < 1000/week → MEDIUM flag
 
 # Download ratio: if parent_downloads > X * dep_downloads → suspicious
 # e.g. axios (100M/week) vs plain-crypto-js (0/week) → ratio = ∞
-DOWNLOAD_RATIO_HIGH = 10_000   # parent 10k× more popular than new dep → HIGH
+DOWNLOAD_RATIO_HIGH = 10_000  # parent 10k× more popular than new dep → HIGH
 DOWNLOAD_RATIO_MEDIUM = 1_000  # parent 1k× more popular → MEDIUM
 
 
 @dataclass
 class DepReputationResult:
     """Reputation assessment for a newly-added dependency."""
+
     package_name: str
     ecosystem: str
     version_spec: str
 
     # Raw metrics (None = could not be fetched)
-    age_days: Optional[int] = None           # Days since first publish
-    weekly_downloads: Optional[int] = None   # Last-week downloads
-    total_versions: Optional[int] = None     # Total number of published versions
-    first_published: Optional[str] = None    # ISO 8601
+    age_days: Optional[int] = None  # Days since first publish
+    weekly_downloads: Optional[int] = None  # Last-week downloads
+    total_versions: Optional[int] = None  # Total number of published versions
+    first_published: Optional[str] = None  # ISO 8601
     latest_version: Optional[str] = None
 
     # Assessment
-    severity: str = "NONE"       # CRITICAL / HIGH / MEDIUM / LOW / NONE
+    severity: str = "NONE"  # CRITICAL / HIGH / MEDIUM / LOW / NONE
     signals: list[str] = field(default_factory=list)
     confidence_boost: float = 0.0
     description: str = ""
@@ -80,9 +81,8 @@ class DepReputationResult:
 
 # ─── Registry fetchers ───────────────────────────────────────────────────────
 
-async def _fetch_npm_metadata(
-    name: str, session: aiohttp.ClientSession
-) -> Optional[dict]:
+
+async def _fetch_npm_metadata(name: str, session: aiohttp.ClientSession) -> Optional[dict]:
     """Fetch npm registry metadata for a package."""
     encoded = name.replace("/", "%2F")
     url = f"https://registry.npmjs.org/{encoded}"
@@ -99,9 +99,7 @@ async def _fetch_npm_metadata(
         return None
 
 
-async def _fetch_npm_downloads(
-    name: str, session: aiohttp.ClientSession
-) -> Optional[int]:
+async def _fetch_npm_downloads(name: str, session: aiohttp.ClientSession) -> Optional[int]:
     """Fetch last-week npm download count."""
     encoded = name.replace("/", "%2F")
     url = f"https://api.npmjs.org/downloads/point/last-week/{encoded}"
@@ -116,9 +114,7 @@ async def _fetch_npm_downloads(
         return None
 
 
-async def _fetch_pypi_metadata(
-    name: str, session: aiohttp.ClientSession
-) -> Optional[dict]:
+async def _fetch_pypi_metadata(name: str, session: aiohttp.ClientSession) -> Optional[dict]:
     """Fetch PyPI package metadata."""
     url = f"https://pypi.org/pypi/{name}/json"
     try:
@@ -135,6 +131,7 @@ async def _fetch_pypi_metadata(
 
 
 # ─── Reputation evaluators ───────────────────────────────────────────────────
+
 
 def _days_since(iso_ts: str) -> Optional[int]:
     """Return number of days since an ISO 8601 timestamp."""
@@ -197,14 +194,10 @@ def _assess_signals(
             )
             score += 35
         elif ratio > DOWNLOAD_RATIO_MEDIUM:
-            signals.append(
-                f"親パッケージとの週間DL比が{ratio:.0f}:1"
-            )
+            signals.append(f"親パッケージとの週間DL比が{ratio:.0f}:1")
             score += 20
     elif parent_downloads and weekly_downloads == 0:
-        signals.append(
-            f"ダウンロード実績ゼロのパッケージ（親パッケージは{parent_downloads:,}DL/週）"
-        )
+        signals.append(f"ダウンロード実績ゼロのパッケージ（親パッケージは{parent_downloads:,}DL/週）")
         score += 40
 
     # Determine severity from score
@@ -233,13 +226,12 @@ async def evaluate_npm_reputation(
     parent_downloads: Optional[int] = None,
 ) -> DepReputationResult:
     """Evaluate npm package reputation."""
-    result = DepReputationResult(
-        package_name=name, ecosystem="npm", version_spec=version_spec
-    )
+    result = DepReputationResult(package_name=name, ecosystem="npm", version_spec=version_spec)
 
     async with aiohttp.ClientSession() as session:
         # Fetch metadata and downloads in parallel
         import asyncio
+
         meta_task = asyncio.create_task(_fetch_npm_metadata(name, session))
         dl_task = asyncio.create_task(_fetch_npm_downloads(name, session))
         meta, downloads = await asyncio.gather(meta_task, dl_task, return_exceptions=True)
@@ -291,9 +283,7 @@ async def evaluate_pypi_reputation(
     parent_downloads: Optional[int] = None,
 ) -> DepReputationResult:
     """Evaluate PyPI package reputation."""
-    result = DepReputationResult(
-        package_name=name, ecosystem="pypi", version_spec=version_spec
-    )
+    result = DepReputationResult(package_name=name, ecosystem="pypi", version_spec=version_spec)
 
     async with aiohttp.ClientSession() as session:
         meta = await _fetch_pypi_metadata(name, session)
@@ -358,8 +348,11 @@ async def evaluate_dep_reputation(
     else:
         # Go/Cargo/Maven: return MEDIUM for unknown ecosystems (conservative)
         return DepReputationResult(
-            package_name=name, ecosystem=ecosystem, version_spec=version_spec,
-            severity="NONE", description="",
+            package_name=name,
+            ecosystem=ecosystem,
+            version_spec=version_spec,
+            severity="NONE",
+            description="",
         )
 
 

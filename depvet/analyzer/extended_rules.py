@@ -15,7 +15,6 @@ from depvet.models.verdict import FindingCategory, Severity
 
 EXTENDED_PATTERNS = [
     # ── Type 7: Credential harvesting ──────────────────────────────────────
-
     # Browser credential path access (Chrome/Chromium/Firefox/Brave)
     {
         "id": "BROWSER_CREDENTIAL_ACCESS",
@@ -71,9 +70,7 @@ EXTENDED_PATTERNS = [
         "description": "macOSキーチェーン/Linuxキーリングへのアクセスが追加された",
         "cwe": "CWE-200",
     },
-
     # ── Webhook exfil channel expansion ────────────────────────────────────
-
     # Pipedream, RequestBin, ngrok, Interactsh, Burp Collaborator etc.
     {
         "id": "EXFIL_WEBHOOK_SERVICE",
@@ -88,9 +85,7 @@ EXTENDED_PATTERNS = [
         "description": "データ窃取用Webhookサービス（pipedream/ngrok/requestbin等）へのURLが追加された",
         "cwe": "CWE-200",
     },
-
     # ── Type 8: DNS exfiltration ───────────────────────────────────────────
-
     # dns.resolve/lookup calls (Python/Node)
     {
         "id": "DNS_RESOLVE_CALL",
@@ -115,9 +110,7 @@ EXTENDED_PATTERNS = [
         "description": "DNS CLIコマンドに変数/コマンド置換が含まれている（DNSエクスフィルトレーション）",
         "cwe": "CWE-200",
     },
-
     # ── Type 10: Native binding injection ──────────────────────────────────
-
     # binding.gyp / node-gyp / node-pre-gyp references
     {
         "id": "BINDING_GYP_ADDED",

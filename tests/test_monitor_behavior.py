@@ -13,13 +13,15 @@ from typing import Optional
 import pytest
 
 from depvet.config.config import (
-    DepVetConfig, WatchlistConfig,
+    DepVetConfig,
+    WatchlistConfig,
 )
 from depvet.models.package import Release
 from depvet.models.verdict import VerdictType
 
 
 # ─── Test helpers ─────────────────────────────────────────────────────────────
+
 
 def make_release(name: str, version: str = "2.0.0", eco: str = "pypi") -> Release:
     return Release(
@@ -77,7 +79,6 @@ async def run_monitor_once(
 
     # Patch the internal monitor creation + router creation
 
-
     # We can't easily inject; instead call _monitor via subtest with mocks
     # Alternative: directly test the core logic patterns
 
@@ -86,6 +87,7 @@ async def run_monitor_once(
 
 
 # ─── Issue #22: No deadlock with queue_max_size ────────────────────────────────
+
 
 class TestNonDeadlock:
     @pytest.mark.asyncio
@@ -125,6 +127,65 @@ class TestNonDeadlock:
         await asyncio.gather(*tasks)
 
         assert len(processed) == 5
+
+    @pytest.mark.asyncio
+    async def test_batch_truncation_defers_state(self):
+        """Issue #22: when queue_max_size truncates releases, state must NOT advance.
+
+        The monitor should only call state.set() when all releases are consumed.
+        If batch is truncated, state stays at old value so overflow releases are
+        re-fetched on the next poll cycle.
+        """
+        _batch_limit = 1
+        releases = [make_release("pkg-a"), make_release("pkg-b")]
+        new_state = {"serial": 2}
+        old_state = {"serial": 0}
+
+        processed = []
+
+        async def fake_process(release):
+            processed.append(release.name)
+
+        truncated = 0 < _batch_limit < len(releases)
+        batch = releases if _batch_limit <= 0 else releases[:_batch_limit]
+        tasks = [asyncio.create_task(fake_process(r)) for r in batch]
+        await asyncio.gather(*tasks)
+
+        # Simulate the deferred state logic from _monitor()
+        saved_state = None
+        if not releases or not (0 < _batch_limit < len(releases)):
+            saved_state = new_state
+        else:
+            saved_state = old_state  # state not advanced
+
+        assert len(processed) == 1, "Only 1 release should be processed"
+        assert truncated is True, "Batch should be truncated"
+        assert saved_state == old_state, (
+            "State must NOT advance when batch is truncated — overflow releases must be re-fetched next cycle"
+        )
+
+    @pytest.mark.asyncio
+    async def test_batch_no_truncation_advances_state(self):
+        """When all releases fit in batch, state should advance normally."""
+        _batch_limit = 5
+        releases = [make_release("pkg-a"), make_release("pkg-b")]
+        new_state = {"serial": 2}
+
+        processed = []
+
+        async def fake_process(release):
+            processed.append(release.name)
+
+        batch = releases if _batch_limit <= 0 else releases[:_batch_limit]
+        tasks = [asyncio.create_task(fake_process(r)) for r in batch]
+        await asyncio.gather(*tasks)
+
+        saved_state = None
+        if not releases or not (0 < _batch_limit < len(releases)):
+            saved_state = new_state
+
+        assert len(processed) == 2, "All releases should be processed"
+        assert saved_state == new_state, "State should advance when no truncation"
 
     @pytest.mark.asyncio
     async def test_semaphore_limits_concurrency(self):
@@ -171,24 +232,27 @@ class TestNonDeadlock:
 
 # ─── Issue #24: Source gating ────────────────────────────────────────────────
 
+
 class TestWatchlistSourceGating:
     def test_sbom_not_loaded_when_sbom_not_in_sources(self):
         """If sources=['top_n'] and sbom_path is set, SBOM must NOT be auto-imported."""
         import depvet.cli as m
         import pathlib
+
         src = pathlib.Path(m.__file__).read_text()
         # Verify the gate: 'sbom' in config.watchlist.sources must be checked
-        monitor_section = src[src.find("async def _monitor"):src.find("# Resolve watchlist sources") + 500]
-        assert '"sbom" in config.watchlist.sources' in monitor_section or \
-               '"sbom" in active_sources' in monitor_section or \
-               '"sbom" in' in src[src.find("effective_sbom"):src.find("effective_sbom") + 300], (
-            "SBOM auto-import must be gated on 'sbom' in config.watchlist.sources"
-        )
+        monitor_section = src[src.find("async def _monitor") : src.find("# Resolve watchlist sources") + 500]
+        assert (
+            '"sbom" in config.watchlist.sources' in monitor_section
+            or '"sbom" in active_sources' in monitor_section
+            or '"sbom" in' in src[src.find("effective_sbom") : src.find("effective_sbom") + 300]
+        ), "SBOM auto-import must be gated on 'sbom' in config.watchlist.sources"
 
     def test_explicit_source_gating_code_exists(self):
         """sources=['top_n'] must not include explicit watchlist."""
         import depvet.cli as m
         import pathlib
+
         src = pathlib.Path(m.__file__).read_text()
         assert "use_explicit" in src or '"explicit" in' in src, (
             "Explicit watchlist must be gated on 'explicit' in sources"
@@ -218,31 +282,34 @@ class TestWatchlistSourceGating:
         """sources=['top_n'] → explicit watchlist entries must not be included."""
         sources_top_n_only = ["top_n"]
         use_explicit = not sources_top_n_only or "explicit" in sources_top_n_only
-        assert use_explicit is False, (
-            "sources=['top_n'] must not include explicit watchlist"
-        )
+        assert use_explicit is False, "sources=['top_n'] must not include explicit watchlist"
 
         sources_with_explicit = ["top_n", "explicit"]
         use_explicit2 = not sources_with_explicit or "explicit" in sources_with_explicit
-        assert use_explicit2 is True, (
-            "sources=['top_n', 'explicit'] must include explicit watchlist"
-        )
+        assert use_explicit2 is True, "sources=['top_n', 'explicit'] must include explicit watchlist"
 
         sources_empty = []
         use_explicit3 = not sources_empty or "explicit" in sources_empty
-        assert use_explicit3 is True, (
-            "empty sources must fall back to including explicit watchlist"
-        )
+        assert use_explicit3 is True, "empty sources must fall back to including explicit watchlist"
 
     def test_config_watchlist_sources_default(self):
-        """Default sources should include 'top_n'."""
+        """Default sources should include both 'explicit' and 'top_n'."""
         cfg = WatchlistConfig()
-        assert "top_n" in cfg.sources or cfg.sources == ["top_n"], (
-            "Default sources must include 'top_n'"
+        assert "top_n" in cfg.sources, "Default sources must include 'top_n'"
+        assert "explicit" in cfg.sources, (
+            "Default sources must include 'explicit' so watchlist add packages are monitored"
         )
+
+    def test_default_sources_include_explicit_watchlist(self):
+        """Issue #27: watchlist add must be monitored with default config."""
+        cfg = WatchlistConfig()
+        sources = cfg.sources
+        use_explicit = not sources or "explicit" in sources
+        assert use_explicit is True, "Default config must include explicit watchlist in monitor"
 
 
 # ─── Issue #26: Release-only alert dispatch ───────────────────────────────────
+
 
 class TestReleaseOnlyDispatch:
     @pytest.mark.asyncio

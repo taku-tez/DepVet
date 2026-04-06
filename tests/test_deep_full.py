@@ -9,7 +9,11 @@ from depvet.analyzer.rules import RuleMatch
 from depvet.analyzer.version_signal import VersionTransitionContext, VersionSignal
 from depvet.differ.chunker import DiffChunk, DiffFile
 from depvet.models.verdict import (
-    DiffStats, FindingCategory, Severity, Verdict, VerdictType,
+    DiffStats,
+    FindingCategory,
+    Severity,
+    Verdict,
+    VerdictType,
 )
 
 
@@ -30,8 +34,11 @@ def mock_analyzer(deep_result: dict | None = None, triage_result=(True, "analyze
     m = MagicMock(spec=BaseAnalyzer)
     m.triage = AsyncMock(return_value=triage_result)
     result = deep_result or {
-        "verdict": "BENIGN", "severity": "NONE",
-        "confidence": 0.9, "findings": [], "summary": "OK"
+        "verdict": "BENIGN",
+        "severity": "NONE",
+        "confidence": 0.9,
+        "findings": [],
+        "summary": "OK",
     }
     m.deep_analyze = AsyncMock(return_value=result)
     m.get_model_name = MagicMock(return_value="mock-model")
@@ -39,6 +46,7 @@ def mock_analyzer(deep_result: dict | None = None, triage_result=(True, "analyze
 
 
 # ─── DeepAnalyzer.analyze ────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_deep_analyze_single_chunk_benign():
@@ -61,12 +69,22 @@ async def test_deep_analyze_single_chunk_benign():
 async def test_deep_analyze_multiple_chunks():
     """Multiple chunks analyzed in parallel, results merged."""
     malicious = {
-        "verdict": "MALICIOUS", "severity": "CRITICAL",
-        "confidence": 0.95, "findings": [
-            {"category": "EXFILTRATION", "description": "creds sent",
-             "file": "auth.py", "line_start": 5, "line_end": 10,
-             "evidence": "os.environ", "cwe": "CWE-200", "severity": "CRITICAL"}
-        ], "summary": "Malicious"
+        "verdict": "MALICIOUS",
+        "severity": "CRITICAL",
+        "confidence": 0.95,
+        "findings": [
+            {
+                "category": "EXFILTRATION",
+                "description": "creds sent",
+                "file": "auth.py",
+                "line_start": 5,
+                "line_end": 10,
+                "evidence": "os.environ",
+                "cwe": "CWE-200",
+                "severity": "CRITICAL",
+            }
+        ],
+        "summary": "Malicious",
     }
     benign = {"verdict": "BENIGN", "severity": "NONE", "confidence": 0.9, "findings": [], "summary": "OK"}
 
@@ -84,8 +102,11 @@ async def test_deep_analyze_multiple_chunks():
     chunks = [make_chunk("+import os", "auth.py"), make_chunk("+x=1", "utils.py")]
     result = await deep.analyze(
         chunks=chunks,
-        package_name="pkg", old_version="1.0", new_version="1.1",
-        ecosystem="pypi", diff_stats=make_stats(),
+        package_name="pkg",
+        old_version="1.0",
+        new_version="1.1",
+        ecosystem="pypi",
+        diff_stats=make_stats(),
     )
     assert result.verdict == VerdictType.MALICIOUS
     assert result.chunks_analyzed == 2
@@ -110,8 +131,11 @@ async def test_deep_analyze_chunk_error_handled():
     chunks = [make_chunk("+bad", "a.py"), make_chunk("+good", "b.py")]
     result = await deep.analyze(
         chunks=chunks,
-        package_name="pkg", old_version="1.0", new_version="1.1",
-        ecosystem="pypi", diff_stats=make_stats(),
+        package_name="pkg",
+        old_version="1.0",
+        new_version="1.1",
+        ecosystem="pypi",
+        diff_stats=make_stats(),
     )
     # Should still return a result from the successful chunk
     assert isinstance(result, Verdict)
@@ -128,8 +152,11 @@ async def test_deep_analyze_all_chunks_fail():
     chunks = [make_chunk()]
     result = await deep.analyze(
         chunks=chunks,
-        package_name="pkg", old_version="1.0", new_version="1.1",
-        ecosystem="pypi", diff_stats=make_stats(),
+        package_name="pkg",
+        old_version="1.0",
+        new_version="1.1",
+        ecosystem="pypi",
+        diff_stats=make_stats(),
     )
     assert result.verdict == VerdictType.UNKNOWN
     assert result.chunks_analyzed == 0
@@ -138,7 +165,9 @@ async def test_deep_analyze_all_chunks_fail():
 @pytest.mark.asyncio
 async def test_deep_analyze_with_rule_matches():
     """Rule matches should be injected into findings."""
-    analyzer = mock_analyzer({"verdict": "BENIGN", "severity": "NONE", "confidence": 0.5, "findings": [], "summary": "OK"})
+    analyzer = mock_analyzer(
+        {"verdict": "BENIGN", "severity": "NONE", "confidence": 0.5, "findings": [], "summary": "OK"}
+    )
     rule = RuleMatch(
         rule_id="GETATTR_EXEC",
         category=FindingCategory.OBFUSCATION,
@@ -152,8 +181,11 @@ async def test_deep_analyze_with_rule_matches():
     deep = DeepAnalyzer(analyzer)
     result = await deep.analyze(
         chunks=[make_chunk()],
-        package_name="pkg", old_version="1.0", new_version="1.1",
-        ecosystem="pypi", diff_stats=make_stats(),
+        package_name="pkg",
+        old_version="1.0",
+        new_version="1.1",
+        ecosystem="pypi",
+        diff_stats=make_stats(),
         rule_matches=[rule],
     )
     # CRITICAL rule should escalate BENIGN to MALICIOUS
@@ -164,15 +196,20 @@ async def test_deep_analyze_with_rule_matches():
 @pytest.mark.asyncio
 async def test_deep_analyze_with_version_context():
     """Version context with HIGH signal should affect confidence."""
-    analyzer = mock_analyzer({"verdict": "SUSPICIOUS", "severity": "MEDIUM", "confidence": 0.5, "findings": [], "summary": "Suspicious"})
+    analyzer = mock_analyzer(
+        {"verdict": "SUSPICIOUS", "severity": "MEDIUM", "confidence": 0.5, "findings": [], "summary": "Suspicious"}
+    )
     ctx = VersionTransitionContext("pkg", "pypi", "1.0", "1.1")
     ctx.signals.append(VersionSignal("MAINTAINER_CHANGE", "メンテナー変更", "HIGH", 0.20))
 
     deep = DeepAnalyzer(analyzer)
     result = await deep.analyze(
         chunks=[make_chunk()],
-        package_name="pkg", old_version="1.0", new_version="1.1",
-        ecosystem="pypi", diff_stats=make_stats(),
+        package_name="pkg",
+        old_version="1.0",
+        new_version="1.1",
+        ecosystem="pypi",
+        diff_stats=make_stats(),
         version_context=ctx,
     )
     # confidence boosted by 0.20
@@ -181,6 +218,7 @@ async def test_deep_analyze_with_version_context():
 
 
 # ─── VerdictMerger edge cases ─────────────────────────────────────────────────
+
 
 def test_merger_single_malicious():
     merger = VerdictMerger()
@@ -201,11 +239,13 @@ def test_merger_unknown_when_all_unknown():
 def test_merger_confidence_capped_at_1():
     merger = VerdictMerger()
     ctx = VersionTransitionContext("pkg", "pypi", "1.0", "1.1")
-    ctx.signals.extend([
-        VersionSignal("A", "signal 1", "HIGH", 0.30),
-        VersionSignal("B", "signal 2", "HIGH", 0.30),
-        VersionSignal("C", "signal 3", "HIGH", 0.30),
-    ])
+    ctx.signals.extend(
+        [
+            VersionSignal("A", "signal 1", "HIGH", 0.30),
+            VersionSignal("B", "signal 2", "HIGH", 0.30),
+            VersionSignal("C", "signal 3", "HIGH", 0.30),
+        ]
+    )
     raw = [{"verdict": "SUSPICIOUS", "severity": "HIGH", "confidence": 0.8, "findings": [], "summary": "x"}]
     result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0, version_context=ctx)
     assert result.confidence <= 1.0
@@ -214,6 +254,7 @@ def test_merger_confidence_capped_at_1():
 def test_merger_analysis_duration_positive():
     """Analysis duration should be a non-negative integer."""
     import time
+
     start = int(time.time() * 1000) - 100  # 100ms ago
     merger = VerdictMerger()
     raw = [{"verdict": "BENIGN", "severity": "NONE", "confidence": 0.9, "findings": [], "summary": "OK"}]
@@ -224,6 +265,7 @@ def test_merger_analysis_duration_positive():
 def test_merger_analyzed_at_iso8601():
     """analyzed_at should be a valid ISO 8601 timestamp."""
     from datetime import datetime
+
     merger = VerdictMerger()
     raw = [{"verdict": "BENIGN", "severity": "NONE", "confidence": 0.9, "findings": [], "summary": "OK"}]
     result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0)
@@ -242,16 +284,36 @@ def test_merger_model_name_preserved():
 def test_merger_invalid_finding_category_skipped():
     """Invalid finding category should be skipped gracefully."""
     merger = VerdictMerger()
-    raw = [{
-        "verdict": "SUSPICIOUS", "severity": "MEDIUM", "confidence": 0.6,
-        "findings": [
-            {"category": "INVALID_CATEGORY", "description": "x", "file": "f.py",
-             "line_start": None, "line_end": None, "evidence": "x", "cwe": None, "severity": "MEDIUM"},
-            {"category": "OBFUSCATION", "description": "valid", "file": "f.py",
-             "line_start": 1, "line_end": 2, "evidence": "eval(x)", "cwe": "CWE-506", "severity": "HIGH"},
-        ],
-        "summary": "Suspicious"
-    }]
+    raw = [
+        {
+            "verdict": "SUSPICIOUS",
+            "severity": "MEDIUM",
+            "confidence": 0.6,
+            "findings": [
+                {
+                    "category": "INVALID_CATEGORY",
+                    "description": "x",
+                    "file": "f.py",
+                    "line_start": None,
+                    "line_end": None,
+                    "evidence": "x",
+                    "cwe": None,
+                    "severity": "MEDIUM",
+                },
+                {
+                    "category": "OBFUSCATION",
+                    "description": "valid",
+                    "file": "f.py",
+                    "line_start": 1,
+                    "line_end": 2,
+                    "evidence": "eval(x)",
+                    "cwe": "CWE-506",
+                    "severity": "HIGH",
+                },
+            ],
+            "summary": "Suspicious",
+        }
+    ]
     result = merger.merge(raw, model="test", diff_stats=make_stats(), start_ms=0)
     # Invalid category should be skipped, valid one kept
     assert len(result.findings) == 1
@@ -260,8 +322,14 @@ def test_merger_invalid_finding_category_skipped():
 
 def test_merger_diff_stats_preserved():
     """DiffStats should pass through to Verdict unchanged."""
-    stats = DiffStats(files_changed=5, lines_added=100, lines_removed=50,
-                      binary_files=["lib.so"], new_files=["new.py"], deleted_files=[])
+    stats = DiffStats(
+        files_changed=5,
+        lines_added=100,
+        lines_removed=50,
+        binary_files=["lib.so"],
+        new_files=["new.py"],
+        deleted_files=[],
+    )
     merger = VerdictMerger()
     raw = [{"verdict": "BENIGN", "severity": "NONE", "confidence": 0.9, "findings": [], "summary": "OK"}]
     result = merger.merge(raw, model="test", diff_stats=stats, start_ms=0)

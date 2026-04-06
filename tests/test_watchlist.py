@@ -11,6 +11,7 @@ from depvet.watchlist.sbom import SBOMParser, _parse_purl
 
 # ─── ExplicitSource ───────────────────────────────────────────
 
+
 def test_explicit_add_and_list():
     src = ExplicitSource()
     src.add("requests", "pypi")
@@ -65,6 +66,7 @@ def test_explicit_load_from_file():
 
 # ─── SBOM Parser ──────────────────────────────────────────────
 
+
 def test_parse_purl_pypi():
     entry = _parse_purl("pkg:pypi/requests@2.31.0")
     assert entry is not None
@@ -97,7 +99,7 @@ def test_sbom_parser_cyclonedx_json():
         "components": [
             {"type": "library", "name": "requests", "version": "2.31.0", "purl": "pkg:pypi/requests@2.31.0"},
             {"type": "library", "name": "flask", "version": "3.0.0", "purl": "pkg:pypi/flask@3.0.0"},
-        ]
+        ],
     }
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump(sbom_data, f)
@@ -113,6 +115,7 @@ def test_sbom_parser_cyclonedx_json():
 
 
 # ─── WatchlistManager ─────────────────────────────────────────
+
 
 def test_watchlist_manager_add_remove():
     with tempfile.NamedTemporaryFile(suffix=".yaml", delete=False) as f:

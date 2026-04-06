@@ -61,6 +61,7 @@ def _make_event(
 
 # ─── StdoutAlerter ───────────────────────────────────────────────────────────
 
+
 class TestStdoutAlerter:
     @pytest.mark.asyncio
     async def test_sends_malicious_output(self, capsys):
@@ -115,6 +116,7 @@ class TestStdoutAlerter:
 
 # ─── SlackAlerter ────────────────────────────────────────────────────────────
 
+
 class TestSlackAlerter:
     @pytest.mark.asyncio
     async def test_no_url_does_nothing(self):
@@ -134,11 +136,13 @@ class TestSlackAlerter:
         with patch("aiohttp.ClientSession") as mock_session_cls:
             mock_resp = AsyncMock()
             mock_resp.status = 200
+            mock_resp.headers = {}
+            mock_resp.release = MagicMock()
             mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
             mock_resp.__aexit__ = AsyncMock(return_value=False)
 
             mock_session = AsyncMock()
-            mock_session.post = MagicMock(return_value=mock_resp)
+            mock_session.request = AsyncMock(return_value=mock_resp)
             mock_session.__aenter__ = AsyncMock(return_value=mock_session)
             mock_session.__aexit__ = AsyncMock(return_value=False)
             mock_session_cls.return_value = mock_session
@@ -147,18 +151,20 @@ class TestSlackAlerter:
             event = _make_event()
             await alerter.send(event)
 
-            mock_session.post.assert_called_once()
-            call_url = mock_session.post.call_args[0][0]
+            mock_session.request.assert_called_once()
+            call_url = mock_session.request.call_args[0][1]
             assert "hooks.slack.com" in call_url
 
     def test_slack_alerter_has_send_method(self):
         """SlackAlerter must have an async send method."""
         alerter = SlackAlerter(webhook_url="https://hooks.slack.com/test")
         import inspect
+
         assert inspect.iscoroutinefunction(alerter.send)
 
 
 # ─── WebhookAlerter ──────────────────────────────────────────────────────────
+
 
 class TestWebhookAlerter:
     @pytest.mark.asyncio
@@ -172,11 +178,13 @@ class TestWebhookAlerter:
         with patch("aiohttp.ClientSession") as mock_cls:
             mock_resp = AsyncMock()
             mock_resp.status = 200
+            mock_resp.headers = {}
+            mock_resp.release = MagicMock()
             mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
             mock_resp.__aexit__ = AsyncMock(return_value=False)
 
             mock_sess = AsyncMock()
-            mock_sess.post = MagicMock(return_value=mock_resp)
+            mock_sess.request = AsyncMock(return_value=mock_resp)
             mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
             mock_sess.__aexit__ = AsyncMock(return_value=False)
             mock_cls.return_value = mock_sess
@@ -184,7 +192,7 @@ class TestWebhookAlerter:
             alerter = WebhookAlerter(url="https://example.com/webhook")
             event = _make_event()
             await alerter.send(event)
-            mock_sess.post.assert_called_once()
+            mock_sess.request.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_hmac_signature_when_secret(self, monkeypatch):
@@ -192,17 +200,19 @@ class TestWebhookAlerter:
         monkeypatch.setenv("TEST_WEBHOOK_SECRET", "my-secret")
         received_headers = {}
 
-        async def fake_post(url, json=None, headers=None, **kwargs):
-            received_headers.update(headers or {})
+        async def fake_request(method, url, **kwargs):
+            received_headers.update(kwargs.get("headers") or {})
             resp = MagicMock()
             resp.status = 200
+            resp.headers = {}
+            resp.release = MagicMock()
             resp.__aenter__ = AsyncMock(return_value=resp)
             resp.__aexit__ = AsyncMock(return_value=False)
             return resp
 
         with patch("aiohttp.ClientSession") as mock_cls:
             mock_sess = AsyncMock()
-            mock_sess.post = fake_post
+            mock_sess.request = fake_request
             mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
             mock_sess.__aexit__ = AsyncMock(return_value=False)
             mock_cls.return_value = mock_sess
@@ -211,13 +221,12 @@ class TestWebhookAlerter:
             event = _make_event()
             await alerter.send(event)
 
-        # Signature header should be present if implementation supports it
-        _ = [k for k in received_headers if "sig" in k.lower() or "hmac" in k.lower()]
-        # Either signature present or implementation doesn't use it (both OK for now)
-        assert True  # structural test
+        assert "X-DepVet-Signature" in received_headers
+        assert received_headers["X-DepVet-Signature"].startswith("sha256=")
 
 
 # ─── AlertRouter ─────────────────────────────────────────────────────────────
+
 
 class TestAlertRouter:
     def test_register_and_count(self):
@@ -307,30 +316,36 @@ class TestAlertRouter:
 
 # ─── _build_release_url (cli helper) ─────────────────────────────────────────
 
+
 class TestBuildReleaseUrl:
     def test_pypi_url(self):
         from depvet.cli import _build_release_url
+
         url = _build_release_url("requests", "2.32.0", "pypi")
         assert "pypi.org" in url
         assert "requests" in url
 
     def test_npm_url(self):
         from depvet.cli import _build_release_url
+
         url = _build_release_url("lodash", "4.17.21", "npm")
         assert "npmjs.com" in url
         assert "lodash" in url
 
     def test_go_url(self):
         from depvet.cli import _build_release_url
+
         url = _build_release_url("github.com/gin-gonic/gin", "v1.9.0", "go")
         assert "pkg.go.dev" in url
 
     def test_cargo_url(self):
         from depvet.cli import _build_release_url
+
         url = _build_release_url("serde", "1.0.0", "cargo")
         assert "crates.io" in url
 
     def test_unknown_ecosystem_returns_npm_url(self):
         from depvet.cli import _build_release_url
+
         url = _build_release_url("pkg", "1.0", "unknown")
         assert url  # should not be empty

@@ -50,6 +50,7 @@ class ClaudeAnalyzer(BaseAnalyzer):
     ):
         try:
             import anthropic
+
             self._client = anthropic.AsyncAnthropic(
                 api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"),
             )
@@ -86,7 +87,7 @@ class ClaudeAnalyzer(BaseAnalyzer):
                 max_tokens=256,
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = response.content[0].text if response.content else "{}"
+            text = getattr(response.content[0], "text", "{}") if response.content else "{}"
             data = _extract_json(text)
             return bool(data.get("should_analyze", True)), data.get("reason", "")
         except Exception as e:
@@ -142,7 +143,7 @@ class ClaudeAnalyzer(BaseAnalyzer):
             max_tokens=self.max_tokens,
             messages=[{"role": "user", "content": prompt}],
         )
-        text = response.content[0].text if response.content else "{}"
+        text = getattr(response.content[0], "text", "{}") if response.content else "{}"
         usage = response.usage
         result = _extract_json(text)
         result["_tokens_used"] = (usage.input_tokens + usage.output_tokens) if usage else 0

@@ -24,21 +24,38 @@ logger = logging.getLogger(__name__)
 
 
 # Security-related packages — long dormancy is expected, don't penalize
-SECURITY_PACKAGES = frozenset({
-    "cryptography", "pyopenssl", "paramiko", "bcrypt", "pyca",
-    "pynacl", "cffi", "certifi", "urllib3",
-    "openssl", "libsodium", "gnupg",
-    # npm
-    "helmet", "jsonwebtoken", "bcryptjs", "node-forge",
-    "argon2", "tweetnacl", "elliptic",
-})
+SECURITY_PACKAGES = frozenset(
+    {
+        "cryptography",
+        "pyopenssl",
+        "paramiko",
+        "bcrypt",
+        "pyca",
+        "pynacl",
+        "cffi",
+        "certifi",
+        "urllib3",
+        "openssl",
+        "libsodium",
+        "gnupg",
+        # npm
+        "helmet",
+        "jsonwebtoken",
+        "bcryptjs",
+        "node-forge",
+        "argon2",
+        "tweetnacl",
+        "elliptic",
+    }
+)
+
 
 def _is_security_package(name: str) -> bool:
     name_lower = name.lower()
-    return (
-        name_lower in SECURITY_PACKAGES or
-        any(kw in name_lower for kw in ("crypto", "ssl", "tls", "auth", "cipher", "hash", "sign"))
+    return name_lower in SECURITY_PACKAGES or any(
+        kw in name_lower for kw in ("crypto", "ssl", "tls", "auth", "cipher", "hash", "sign")
     )
+
 
 def _parse_timestamp(ts_str: str) -> Optional[datetime]:
     """Parse ISO 8601 timestamp string, handling Z suffix and fractional seconds."""
@@ -57,35 +74,39 @@ def _detect_dormancy(
     if _is_security_package(name):
         return
     if gap_days > 365:
-        ctx.signals.append(VersionSignal(
-            signal_id="LONG_DORMANCY",
-            description=f"前回リリースから{gap_days}日ぶりの更新（休眠パッケージの復活）",
-            severity="HIGH",
-            confidence_boost=0.15,
-        ))
+        ctx.signals.append(
+            VersionSignal(
+                signal_id="LONG_DORMANCY",
+                description=f"前回リリースから{gap_days}日ぶりの更新（休眠パッケージの復活）",
+                severity="HIGH",
+                confidence_boost=0.15,
+            )
+        )
     elif gap_days > 180:
-        ctx.signals.append(VersionSignal(
-            signal_id="MEDIUM_DORMANCY",
-            description=f"前回リリースから{gap_days}日ぶりの更新",
-            severity="MEDIUM",
-            confidence_boost=0.08,
-        ))
-
-
+        ctx.signals.append(
+            VersionSignal(
+                signal_id="MEDIUM_DORMANCY",
+                description=f"前回リリースから{gap_days}日ぶりの更新",
+                severity="MEDIUM",
+                confidence_boost=0.08,
+            )
+        )
 
 
 @dataclass
 class VersionSignal:
     """A suspicious signal detected in the version transition."""
+
     signal_id: str
     description: str
-    severity: str        # CRITICAL / HIGH / MEDIUM / LOW
+    severity: str  # CRITICAL / HIGH / MEDIUM / LOW
     confidence_boost: float  # how much to add to final confidence if SUSPICIOUS/MALICIOUS
 
 
 @dataclass
 class VersionTransitionContext:
     """Context about a package version transition."""
+
     package_name: str
     ecosystem: str
     old_version: str
@@ -164,12 +185,14 @@ async def analyze_pypi_transition(
         old_author = old_info.get("author", "")
         if old_author and new_info_author and old_author != new_info_author:
             ctx.maintainer_changed = True
-            ctx.signals.append(VersionSignal(
-                signal_id="MAINTAINER_CHANGE",
-                description=f"メンテナーが変更された（{old_author} → {new_info_author}）",
-                severity="HIGH",
-                confidence_boost=0.20,
-            ))
+            ctx.signals.append(
+                VersionSignal(
+                    signal_id="MAINTAINER_CHANGE",
+                    description=f"メンテナーが変更された（{old_author} → {new_info_author}）",
+                    severity="HIGH",
+                    confidence_boost=0.20,
+                )
+            )
 
     # --- Signal: New install hook ---
     # Check if setup.py install hook was present in old version's file list
@@ -178,12 +201,14 @@ async def analyze_pypi_transition(
     # We detect hook content in diff separately; here just flag setup.py appearance
     if new_has_setup and not old_has_setup:
         ctx.new_install_hook = True
-        ctx.signals.append(VersionSignal(
-            signal_id="NEW_SETUP_PY",
-            description="新バージョンでsetup.pyが追加された（インストール時実行の可能性）",
-            severity="MEDIUM",
-            confidence_boost=0.10,
-        ))
+        ctx.signals.append(
+            VersionSignal(
+                signal_id="NEW_SETUP_PY",
+                description="新バージョンでsetup.pyが追加された（インストール時実行の可能性）",
+                severity="MEDIUM",
+                confidence_boost=0.10,
+            )
+        )
 
     return ctx
 
@@ -247,12 +272,14 @@ async def analyze_npm_transition(
         removed = old_maintainers - new_maintainers
         if added or removed:
             ctx.maintainer_changed = True
-            ctx.signals.append(VersionSignal(
-                signal_id="MAINTAINER_CHANGE",
-                description=f"メンテナーが変更された（追加: {added}, 削除: {removed}）",
-                severity="HIGH",
-                confidence_boost=0.20,
-            ))
+            ctx.signals.append(
+                VersionSignal(
+                    signal_id="MAINTAINER_CHANGE",
+                    description=f"メンテナーが変更された（追加: {added}, 削除: {removed}）",
+                    severity="HIGH",
+                    confidence_boost=0.20,
+                )
+            )
 
     # --- Signal: New suspicious dependencies ---
     old_deps = set(old_meta.get("dependencies", {}).keys())
@@ -265,12 +292,14 @@ async def analyze_npm_transition(
             ctx.new_suspicious_deps.append(dep)
 
     if ctx.new_suspicious_deps:
-        ctx.signals.append(VersionSignal(
-            signal_id="NEW_DEPENDENCY",
-            description=f"新しい依存パッケージが追加された: {', '.join(ctx.new_suspicious_deps[:3])}",
-            severity="MEDIUM",
-            confidence_boost=0.08,
-        ))
+        ctx.signals.append(
+            VersionSignal(
+                signal_id="NEW_DEPENDENCY",
+                description=f"新しい依存パッケージが追加された: {', '.join(ctx.new_suspicious_deps[:3])}",
+                severity="MEDIUM",
+                confidence_boost=0.08,
+            )
+        )
 
     # --- Signal: New postinstall/preinstall ---
     old_scripts = old_meta.get("scripts", {})
@@ -278,12 +307,14 @@ async def analyze_npm_transition(
     new_hooks = {k for k in ("postinstall", "preinstall", "install") if k in new_scripts and k not in old_scripts}
     if new_hooks:
         ctx.new_install_hook = True
-        ctx.signals.append(VersionSignal(
-            signal_id="NEW_INSTALL_HOOK",
-            description=f"インストールフックが追加された: {', '.join(new_hooks)}",
-            severity="CRITICAL",
-            confidence_boost=0.30,
-        ))
+        ctx.signals.append(
+            VersionSignal(
+                signal_id="NEW_INSTALL_HOOK",
+                description=f"インストールフックが追加された: {', '.join(new_hooks)}",
+                severity="CRITICAL",
+                confidence_boost=0.30,
+            )
+        )
 
     return ctx
 
@@ -363,60 +394,71 @@ async def analyze_diff_stats_signals(
     # Signal: Massive code addition relative to deletion (inject-heavy)
     if total_removed > 0 and total_added / max(total_removed, 1) > 5:
         if total_added > 50:
-            signals.append(VersionSignal(
-                signal_id="LARGE_ADDITION",
-                description=f"削除{total_removed}行に対して追加{total_added}行（注入型変更の疑い）",
-                severity="MEDIUM",
-                confidence_boost=0.05,
-            ))
+            signals.append(
+                VersionSignal(
+                    signal_id="LARGE_ADDITION",
+                    description=f"削除{total_removed}行に対して追加{total_added}行（注入型変更の疑い）",
+                    severity="MEDIUM",
+                    confidence_boost=0.05,
+                )
+            )
     elif total_removed == 0 and total_added > 100:
         # Pure addition with no removals — very common in backdoor injection
-        signals.append(VersionSignal(
-            signal_id="PURE_ADDITION",
-            description=f"既存コードへの純粋追加（{total_added}行）—削除なし",
-            severity="MEDIUM",
-            confidence_boost=0.07,
-        ))
+        signals.append(
+            VersionSignal(
+                signal_id="PURE_ADDITION",
+                description=f"既存コードへの純粋追加（{total_added}行）—削除なし",
+                severity="MEDIUM",
+                confidence_boost=0.07,
+            )
+        )
 
     # Signal: Test files deleted (attackers remove tests to avoid detection)
     test_files_deleted = [
-        f for f in deleted_files
-        if any(pat in f for pat in ("test_", "_test", ".spec.", ".test.", "/test/", "/tests/"))
+        f for f in deleted_files if any(pat in f for pat in ("test_", "_test", ".spec.", ".test.", "/test/", "/tests/"))
     ]
     if test_files_deleted and len(test_files_deleted) >= 2:
-        signals.append(VersionSignal(
-            signal_id="TESTS_DELETED",
-            description=f"テストファイルが{len(test_files_deleted)}件削除された（悪意コードのテスト検出回避の疑い）",
-            severity="HIGH",
-            confidence_boost=0.15,
-        ))
+        signals.append(
+            VersionSignal(
+                signal_id="TESTS_DELETED",
+                description=f"テストファイルが{len(test_files_deleted)}件削除された（悪意コードのテスト検出回避の疑い）",
+                severity="HIGH",
+                confidence_boost=0.15,
+            )
+        )
 
     # Signal: Binary files added (potential payload embedding)
     suspicious_binaries = [
-        f for f in binary_files
+        f
+        for f in binary_files
         if any(f.endswith(ext) for ext in (".so", ".dll", ".exe", ".bin", ".pyc"))
         and not f.endswith(".pyc")  # compiled python is normal
     ]
     if suspicious_binaries:
-        signals.append(VersionSignal(
-            signal_id="BINARY_ADDED",
-            description=f"実行可能バイナリが追加された: {', '.join(suspicious_binaries[:2])}",
-            severity="HIGH",
-            confidence_boost=0.20,
-        ))
+        signals.append(
+            VersionSignal(
+                signal_id="BINARY_ADDED",
+                description=f"実行可能バイナリが追加された: {', '.join(suspicious_binaries[:2])}",
+                severity="HIGH",
+                confidence_boost=0.20,
+            )
+        )
 
     # Signal: Setup/build files modified (install-time execution vector)
     build_files_changed = [
-        f for f in (new_files + [f for f in deleted_files])
+        f
+        for f in (new_files + [f for f in deleted_files])
         if any(pat in f for pat in ("setup.py", "pyproject.toml", "package.json", "binding.gyp"))
     ]
     if build_files_changed:
-        signals.append(VersionSignal(
-            signal_id="BUILD_FILES_CHANGED",
-            description=f"ビルドファイルが変更された: {', '.join(build_files_changed[:2])}",
-            severity="MEDIUM",
-            confidence_boost=0.08,
-        ))
+        signals.append(
+            VersionSignal(
+                signal_id="BUILD_FILES_CHANGED",
+                description=f"ビルドファイルが変更された: {', '.join(build_files_changed[:2])}",
+                severity="MEDIUM",
+                confidence_boost=0.08,
+            )
+        )
 
     return signals
 
@@ -442,7 +484,7 @@ async def analyze_zero_code_change_signal(
     Returns:
         list of VersionSignal
     """
-    signals = []
+    signals: list[VersionSignal] = []
 
     if not new_deps or diff_stats is None:
         return signals
@@ -458,42 +500,47 @@ async def analyze_zero_code_change_signal(
     # Strongest signal: exactly 0 lines of code changed + new dep added
     if total_lines == 0 and new_deps:
         dep_names = [d.name for d in new_deps[:3]]
-        signals.append(VersionSignal(
-            signal_id="MANIFEST_ONLY_NEW_DEP",
-            description=(
-                f"コード変更ゼロかつ新規依存追加: {', '.join(dep_names)}"
-                f" — サプライチェーン攻撃の最高リスクパターン"
-            ),
-            severity="CRITICAL",
-            confidence_boost=0.35,
-        ))
+        signals.append(
+            VersionSignal(
+                signal_id="MANIFEST_ONLY_NEW_DEP",
+                description=(
+                    f"コード変更ゼロかつ新規依存追加: {', '.join(dep_names)} — サプライチェーン攻撃の最高リスクパターン"
+                ),
+                severity="CRITICAL",
+                confidence_boost=0.35,
+            )
+        )
 
     # Strong signal: very few lines changed (1-5) + new dep added
     elif total_lines <= 5 and new_deps:
         dep_names = [d.name for d in new_deps[:3]]
-        signals.append(VersionSignal(
-            signal_id="ZERO_CODE_CHANGE_WITH_NEW_DEP",
-            description=(
-                f"ソースコード変更わずか{total_lines}行にもかかわらず"
-                f"新規依存パッケージが追加された: {', '.join(dep_names)}"
-                f" — axios 2026年攻撃と同一パターン"
-            ),
-            severity="HIGH",
-            confidence_boost=0.25,
-        ))
+        signals.append(
+            VersionSignal(
+                signal_id="ZERO_CODE_CHANGE_WITH_NEW_DEP",
+                description=(
+                    f"ソースコード変更わずか{total_lines}行にもかかわらず"
+                    f"新規依存パッケージが追加された: {', '.join(dep_names)}"
+                    f" — axios 2026年攻撃と同一パターン"
+                ),
+                severity="HIGH",
+                confidence_boost=0.25,
+            )
+        )
 
     # Also flag if: large number of new deps added at once (unusual for minor versions)
     if len(new_deps) >= 3:
         dep_names = [d.name for d in new_deps[:5]]
-        signals.append(VersionSignal(
-            signal_id="MANY_NEW_DEPS_AT_ONCE",
-            description=(
-                f"一度に{len(new_deps)}個の新規依存パッケージが追加された: "
-                f"{', '.join(dep_names[:3])}{'...' if len(dep_names) > 3 else ''}"
-            ),
-            severity="MEDIUM",
-            confidence_boost=0.10,
-        ))
+        signals.append(
+            VersionSignal(
+                signal_id="MANY_NEW_DEPS_AT_ONCE",
+                description=(
+                    f"一度に{len(new_deps)}個の新規依存パッケージが追加された: "
+                    f"{', '.join(dep_names[:3])}{'...' if len(dep_names) > 3 else ''}"
+                ),
+                severity="MEDIUM",
+                confidence_boost=0.10,
+            )
+        )
 
     return signals
 
@@ -561,12 +608,14 @@ async def analyze_go_transition(
             old_origin = (old_info.get("Origin") or {}).get("URL", "")
             new_origin = (new_info.get("Origin") or {}).get("URL", "")
             if old_origin and new_origin and old_origin != new_origin:
-                ctx.signals.append(VersionSignal(
-                    signal_id="VCS_ORIGIN_CHANGED",
-                    description=f"Go module のVCSリポジトリURLが変更された: {old_origin} → {new_origin}（モジュールハイジャックの可能性）",
-                    severity="CRITICAL",
-                    confidence_boost=0.40,
-                ))
+                ctx.signals.append(
+                    VersionSignal(
+                        signal_id="VCS_ORIGIN_CHANGED",
+                        description=f"Go module のVCSリポジトリURLが変更された: {old_origin} → {new_origin}（モジュールハイジャックの可能性）",
+                        severity="CRITICAL",
+                        confidence_boost=0.40,
+                    )
+                )
 
     except Exception as e:
         logger.warning(f"Go transition analysis failed for {name}: {e}")
@@ -627,12 +676,14 @@ async def analyze_cargo_transition(
 
             # --- Signal: Yanked version update (publishing yanked → then a new version) ---
             if old_ver and old_ver.get("yanked", False):
-                ctx.signals.append(VersionSignal(
-                    signal_id="YANKED_PREDECESSOR",
-                    description=f"旧バージョン {old_version} は crates.io でyanked（取り消し）されています",
-                    severity="MEDIUM",
-                    confidence_boost=0.10,
-                ))
+                ctx.signals.append(
+                    VersionSignal(
+                        signal_id="YANKED_PREDECESSOR",
+                        description=f"旧バージョン {old_version} は crates.io でyanked（取り消し）されています",
+                        severity="MEDIUM",
+                        confidence_boost=0.10,
+                    )
+                )
 
         # Note: crates.io does not expose per-version owner history via public API.
         # Owner change detection would require audit log access (not available).
