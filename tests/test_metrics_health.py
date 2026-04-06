@@ -129,6 +129,32 @@ class TestCheckHealth:
             check_health(str(tmp_path / "missing.json"))
         assert exc_info.value.code == 0
 
+    def test_corrupt_file_exits_unhealthy(self, tmp_path):
+        """[Finding 2] Corrupt health file on disk must exit 1, not 0."""
+        path = tmp_path / "health.json"
+        path.write_text("{{{bad json")
+        with pytest.raises(SystemExit) as exc_info:
+            check_health(str(path))
+        assert exc_info.value.code == 1
+
+    def test_invalid_epoch_exits_unhealthy(self, tmp_path):
+        """[Finding 3] Invalid updated_epoch must exit 1, not crash with ValueError."""
+        path = tmp_path / "health.json"
+        data = {"status": "ok", "pid": 1, "updated_epoch": "not-a-number"}
+        Path(path).write_text(json.dumps(data))
+        with pytest.raises(SystemExit) as exc_info:
+            check_health(str(path))
+        assert exc_info.value.code == 1
+
+    def test_missing_epoch_treated_as_stale(self, tmp_path):
+        """Missing updated_epoch should fall back to 0 → stale → exit 1."""
+        path = tmp_path / "health.json"
+        data = {"status": "ok", "pid": 1}
+        Path(path).write_text(json.dumps(data))
+        with pytest.raises(SystemExit) as exc_info:
+            check_health(str(path))
+        assert exc_info.value.code == 1
+
 
 class TestMetricsAlertTracking:
     def test_record_alert_sent(self):

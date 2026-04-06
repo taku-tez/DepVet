@@ -280,6 +280,44 @@ class TestCrashInjection:
 # ─── Integration: patterns loaded correctly ─────────────────────────────────
 
 
+# ─── SOCKET_CONNECT_IP (Finding 7: regex fix) ──────────────────────────────
+
+
+class TestSocketConnectIP:
+    def test_socket_connect_ip_matches(self):
+        """[Finding 7] SOCKET_CONNECT_IP should match direct IP socket connections."""
+        diff = make_diff(
+            [
+                "s = socket.socket()",
+                "s.connect(('192.168.1.1', 4444))",
+            ]
+        )
+        m = scan_diff_full(diff)
+        assert any(r.rule_id == "SOCKET_CONNECT_IP" for r in m)
+
+    def test_socket_connect_ip_no_backspace(self):
+        """[Finding 7] SOCKET_CONNECT_IP regex must not contain backspace char."""
+        from depvet.analyzer.rules import MALICIOUS_PATTERNS
+
+        for p in MALICIOUS_PATTERNS:
+            if p["id"] == "SOCKET_CONNECT_IP":
+                raw = p["pattern"].pattern
+                assert "\x08" not in raw, f"Backspace char found in SOCKET_CONNECT_IP pattern: {raw!r}"
+                break
+        else:
+            pytest.fail("SOCKET_CONNECT_IP pattern not found in MALICIOUS_PATTERNS")
+
+    def test_socket_connect_ip_no_false_positive(self):
+        diff = make_diff(
+            [
+                "s = socket.socket()",
+                "s.connect(('localhost', 8080))",
+            ]
+        )
+        m = scan_diff_full(diff)
+        assert not any(r.rule_id == "SOCKET_CONNECT_IP" for r in m)
+
+
 def test_sabotage_patterns_registered():
     """All inline Type 5 sabotage patterns should be in MALICIOUS_PATTERNS."""
     from depvet.analyzer.rules import MALICIOUS_PATTERNS

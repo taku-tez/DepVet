@@ -203,3 +203,61 @@ class TestJsonFormatterStructuredFields:
         record = self._make_record("test")
         data = json.loads(fmt.format(record))
         assert "+00:00" in data["timestamp"]
+
+    def test_metrics_fields_in_allowlist(self):
+        """[Finding 5] MonitorMetrics.to_dict() keys must appear in JSON output."""
+        fmt = JsonFormatter()
+        record = self._make_record(
+            "Monitor metrics summary",
+            releases_processed=10,
+            alerts_sent=3,
+            alerts_failed=1,
+            total_tokens_used=5000,
+            avg_analysis_ms=250.0,
+            cycles_completed=5,
+            releases_skipped=2,
+            analyses_completed=8,
+            total_analysis_duration_ms=2000,
+            avg_tokens_per_analysis=625.0,
+            uptime_seconds=3600,
+        )
+        data = json.loads(fmt.format(record))
+        assert data["releases_processed"] == 10
+        assert data["alerts_sent"] == 3
+        assert data["alerts_failed"] == 1
+        assert data["total_tokens_used"] == 5000
+        assert data["avg_analysis_ms"] == 250.0
+        assert data["cycles_completed"] == 5
+        assert data["uptime_seconds"] == 3600
+
+    def test_log_summary_emits_structured_json(self):
+        """[Finding 5] MonitorMetrics.log_summary() with JsonFormatter should
+        include metrics keys in JSON output, not just message."""
+        from depvet.metrics import MonitorMetrics
+        from depvet.logging import setup_logging
+
+        setup_logging(verbose=True, log_format="json")
+
+        m = MonitorMetrics()
+        m.record_release("pypi")
+        m.record_analysis(tokens=100, duration_ms=500)
+        m.record_alert_sent()
+
+        # Capture log output
+        import io
+
+        handler = logging.StreamHandler(io.StringIO())
+        handler.setFormatter(JsonFormatter())
+
+        metrics_logger = logging.getLogger("depvet.metrics")
+        metrics_logger.addHandler(handler)
+        metrics_logger.setLevel(logging.INFO)
+        try:
+            m.log_summary()
+            output = handler.stream.getvalue()
+            data = json.loads(output.strip())
+            assert data["releases_processed"] == 1
+            assert data["alerts_sent"] == 1
+            assert data["total_tokens_used"] == 100
+        finally:
+            metrics_logger.removeHandler(handler)

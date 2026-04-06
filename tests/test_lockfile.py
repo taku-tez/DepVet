@@ -338,6 +338,28 @@ class TestGoSumEdgeCases:
 
 
 class TestManagerImportLockfile:
+    def test_import_twice_returns_zero_on_second(self, tmp_path):
+        """[Finding 6] Re-importing same lockfile must return 0, not len(entries)."""
+        from depvet.watchlist.manager import WatchlistManager
+
+        lockdata = {
+            "lockfileVersion": 3,
+            "packages": {
+                "": {},
+                "node_modules/lodash": {"version": "4.17.21"},
+                "node_modules/express": {"version": "4.18.2"},
+            },
+        }
+        lock_path = tmp_path / "package-lock.json"
+        lock_path.write_text(json.dumps(lockdata))
+
+        wl = WatchlistManager(storage_path=str(tmp_path / "watchlist.yaml"))
+        count1 = wl.import_from_lockfile(str(lock_path))
+        assert count1 == 2
+        count2 = wl.import_from_lockfile(str(lock_path))
+        assert count2 == 0, "Re-import of same lockfile should add 0 new packages"
+        assert len(wl.all_entries()) == 2
+
     def test_import_adds_to_watchlist(self, tmp_path):
         from depvet.watchlist.manager import WatchlistManager
 

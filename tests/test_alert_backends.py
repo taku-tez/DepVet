@@ -113,6 +113,17 @@ class TestStdoutAlerter:
         out = capsys.readouterr().out
         assert out.strip() != ""
 
+    @pytest.mark.asyncio
+    async def test_low_severity_shown_when_min_is_low(self, capsys):
+        """[Finding 1] StdoutAlerter must respect min_severity=LOW, not hardcode MEDIUM."""
+        alerter = StdoutAlerter(json_mode=True, min_severity="LOW")
+        event = _make_event(VerdictType.SUSPICIOUS, Severity.LOW)
+        await alerter.send(event)
+        out = capsys.readouterr().out.strip()
+        assert out != "", "LOW severity event should be output when min_severity=LOW"
+        parsed = json.loads(out)
+        assert parsed["severity"] == "LOW"
+
 
 # ─── SlackAlerter ────────────────────────────────────────────────────────────
 
@@ -312,6 +323,24 @@ class TestAlertRouter:
         router = AlertRouter(min_severity="NONE")
         event = _make_event(VerdictType.BENIGN, Severity.NONE)
         assert not router._should_alert(event)
+
+    @pytest.mark.asyncio
+    async def test_failed_count_tracked(self):
+        """[Finding 4] Router should track failed_count when all alerters fail."""
+
+        class FailAlerter:
+            name = "fail"
+
+            async def send(self, event):
+                raise RuntimeError("boom")
+
+        router = AlertRouter(min_severity="LOW")
+        router.register(FailAlerter())
+
+        event = _make_event(VerdictType.MALICIOUS, Severity.HIGH)
+        await router.dispatch(event)
+        assert router.dispatched_count == 0
+        assert router.failed_count == 1
 
 
 # ─── _build_release_url (cli helper) ─────────────────────────────────────────

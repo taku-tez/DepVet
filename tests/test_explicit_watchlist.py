@@ -129,6 +129,29 @@ class TestExplicitSource:
         assert "requests" in content
         assert "lodash" not in content
 
+    def test_load_from_file_dedup_count(self, tmp_path):
+        """[Finding 6] load_from_file must return newly added count, not total lines."""
+        f = tmp_path / "packages.txt"
+        f.write_text("requests\nflask\n")
+        src = ExplicitSource()
+        count1 = src.load_from_file(str(f), "pypi")
+        assert count1 == 2
+        # Loading same file again should return 0 (all duplicates)
+        count2 = src.load_from_file(str(f), "pypi")
+        assert count2 == 0
+        assert len(src.entries()) == 2
+
+    def test_load_from_file_partial_dedup(self, tmp_path):
+        """Partial overlap: only new packages counted."""
+        f1 = tmp_path / "p1.txt"
+        f1.write_text("requests\nflask\n")
+        f2 = tmp_path / "p2.txt"
+        f2.write_text("flask\nnumpy\n")
+        src = ExplicitSource()
+        assert src.load_from_file(str(f1), "pypi") == 2
+        assert src.load_from_file(str(f2), "pypi") == 1  # only numpy is new
+        assert len(src.entries()) == 3
+
     def test_load_and_save_roundtrip(self, tmp_path):
         f = tmp_path / "packages.txt"
         f.write_text("alpha\nbeta\ngamma\n")
