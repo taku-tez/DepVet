@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timezone
 
 import aiohttp
+from typing import Optional
 
 from depvet.http import retry_request
 from depvet.models.package import Release
@@ -48,6 +49,7 @@ class CargoMonitor(BaseRegistryMonitor):
         self,
         watchlist: set[str],
         since_state: dict,
+        session: Optional[aiohttp.ClientSession] = None,
     ) -> tuple[list[Release], dict]:
         if not watchlist:
             return [], since_state
@@ -56,7 +58,10 @@ class CargoMonitor(BaseRegistryMonitor):
         releases: list[Release] = []
         new_known: dict[str, str] = dict(known_versions)
 
-        async with aiohttp.ClientSession(headers=self._headers()) as session:
+        close_session = session is None
+        if session is None:
+            session = aiohttp.ClientSession(headers=self._headers())
+        try:
             for crate in watchlist:
                 try:
                     versions = await self._get_versions(crate, session)
@@ -89,39 +94,47 @@ class CargoMonitor(BaseRegistryMonitor):
 
                 except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                     logger.warning(f"Failed to check Cargo crate {crate}: {e}")
+        finally:
+            if close_session:
+                await session.close()
 
         return releases, {"crates": new_known}
 
-    async def load_top_n(self, n: int) -> list[str]:
+    async def load_top_n(self, n: int, session: Optional[aiohttp.ClientSession] = None) -> list[str]:
         """Load top N crates by recent downloads from crates.io."""
+        close_session = session is None
+        if session is None:
+            session = aiohttp.ClientSession(headers=self._headers())
         try:
-            async with aiohttp.ClientSession(headers=self._headers()) as session:
-                page = 1
-                results: list[str] = []
-                while len(results) < n:
-                    params = {"sort": "downloads", "per_page": 100, "page": page}
-                    resp = await retry_request(
-                        session,
-                        "GET",
-                        f"{CRATES_IO_API}/crates",
-                        params=params,
-                        timeout=_TOP_N_TIMEOUT,
-                    )
-                    async with resp:
-                        if resp.status != 200:
-                            break
-                        data = await resp.json()
-                    crates = data.get("crates", [])
-                    if not crates:
+            page = 1
+            results: list[str] = []
+            while len(results) < n:
+                params = {"sort": "downloads", "per_page": 100, "page": page}
+                resp = await retry_request(
+                    session,
+                    "GET",
+                    f"{CRATES_IO_API}/crates",
+                    params=params,
+                    timeout=_TOP_N_TIMEOUT,
+                )
+                async with resp:
+                    if resp.status != 200:
                         break
-                    results.extend(c["name"] for c in crates)
-                    page += 1
-                    if len(crates) < 100:
-                        break
-                return results[:n]
+                    data = await resp.json()
+                crates = data.get("crates", [])
+                if not crates:
+                    break
+                results.extend(c["name"] for c in crates)
+                page += 1
+                if len(crates) < 100:
+                    break
+            return results[:n]
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.error(f"Failed to load top Cargo crates: {e}")
             return []
+        finally:
+            if close_session:
+                await session.close()
 
     async def _get_versions(self, crate: str, session: aiohttp.ClientSession) -> list[dict]:
         """Get version list for a crate (newest first, non-yanked)."""

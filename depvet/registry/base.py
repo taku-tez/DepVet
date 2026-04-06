@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Optional
+
+import aiohttp
 
 from depvet.models.package import Release
 
@@ -15,6 +18,7 @@ class BaseRegistryMonitor(ABC):
         self,
         watchlist: set[str],
         since_state: dict,
+        session: Optional[aiohttp.ClientSession] = None,
     ) -> tuple[list[Release], dict]:
         """
         Fetch new releases for packages in watchlist since the given state.
@@ -23,7 +27,7 @@ class BaseRegistryMonitor(ABC):
         ...
 
     @abstractmethod
-    async def load_top_n(self, n: int) -> list[str]:
+    async def load_top_n(self, n: int, session: Optional[aiohttp.ClientSession] = None) -> list[str]:
         """Return top N package names by download count."""
         ...
 

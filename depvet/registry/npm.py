@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timezone
 
 import aiohttp
+from typing import Optional
 
 from depvet.http import retry_request
 from depvet.models.package import Release
@@ -31,28 +32,38 @@ class NpmMonitor(BaseRegistryMonitor):
     def ecosystem(self) -> str:
         return "npm"
 
-    async def get_new_releases(self, watchlist, since_state):
+    async def get_new_releases(
+        self,
+        watchlist: set[str],
+        since_state: dict,
+        session: Optional[aiohttp.ClientSession] = None,
+    ):
         seq = since_state.get("seq", "now")
         params = {"since": seq, "limit": 500, "include_docs": "true"}
         releases = []
         new_seq = seq
+        close_session = session is None
+        if session is None:
+            session = aiohttp.ClientSession()
         try:
-            async with aiohttp.ClientSession() as session:
-                resp = await retry_request(
-                    session,
-                    "GET",
-                    CHANGES_URL,
-                    params=params,
-                    timeout=_CHANGES_TIMEOUT,
-                )
-                async with resp:
-                    if resp.status != 200:
-                        logger.warning(f"npm _changes returned {resp.status}")
-                        return [], since_state
-                    data = await resp.json(content_type=None)
+            resp = await retry_request(
+                session,
+                "GET",
+                CHANGES_URL,
+                params=params,
+                timeout=_CHANGES_TIMEOUT,
+            )
+            async with resp:
+                if resp.status != 200:
+                    logger.warning(f"npm _changes returned {resp.status}")
+                    return [], since_state
+                data = await resp.json(content_type=None)
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.error(f"npm _changes feed failed: {e}")
             return [], since_state
+        finally:
+            if close_session:
+                await session.close()
         results = data.get("results", [])
         if results:
             new_seq = str(results[-1].get("seq", seq))
@@ -88,16 +99,21 @@ class NpmMonitor(BaseRegistryMonitor):
             )
         return releases, {"seq": new_seq, "epoch": 0}
 
-    async def load_top_n(self, n):
+    async def load_top_n(self, n: int, session: Optional[aiohttp.ClientSession] = None):
         url = TOP_PACKAGES_URL.format(n=min(n, 250))
+        close_session = session is None
+        if session is None:
+            session = aiohttp.ClientSession()
         try:
-            async with aiohttp.ClientSession() as session:
-                resp = await retry_request(session, "GET", url, timeout=_TIMEOUT)
-                async with resp:
-                    if resp.status != 200:
-                        return []
-                    data = await resp.json(content_type=None)
+            resp = await retry_request(session, "GET", url, timeout=_TIMEOUT)
+            async with resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json(content_type=None)
             return [obj["package"]["name"] for obj in data.get("objects", [])]
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.error(f"Failed to load top npm packages: {e}")
             return []
+        finally:
+            if close_session:
+                await session.close()

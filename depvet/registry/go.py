@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timezone
 
 import aiohttp
+from typing import Optional
 
 from depvet.http import retry_request
 from depvet.models.package import Release
@@ -44,6 +45,7 @@ class GoModulesMonitor(BaseRegistryMonitor):
         self,
         watchlist: set[str],
         since_state: dict,
+        session: Optional[aiohttp.ClientSession] = None,
     ) -> tuple[list[Release], dict]:
         if not watchlist:
             return [], since_state
@@ -52,7 +54,10 @@ class GoModulesMonitor(BaseRegistryMonitor):
         releases: list[Release] = []
         new_known: dict[str, str] = dict(known_versions)
 
-        async with aiohttp.ClientSession() as session:
+        close_session = session is None
+        if session is None:
+            session = aiohttp.ClientSession()
+        try:
             for module in watchlist:
                 try:
                     versions = await self._list_versions(module, session)
@@ -87,6 +92,9 @@ class GoModulesMonitor(BaseRegistryMonitor):
 
                 except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                     logger.warning(f"Failed to check Go module {module}: {e}")
+        finally:
+            if close_session:
+                await session.close()
 
         return releases, {"modules": new_known}
 
@@ -114,39 +122,44 @@ class GoModulesMonitor(BaseRegistryMonitor):
         "github.com/go-chi/chi",
     ]
 
-    async def load_top_n(self, n: int) -> list[str]:
+    async def load_top_n(self, n: int, session: Optional[aiohttp.ClientSession] = None) -> list[str]:
         """Load top Go modules by import count from pkg.go.dev search API.
 
         Falls back to a curated list if the API is unavailable.
         """
+        close_session = session is None
+        if session is None:
+            session = aiohttp.ClientSession()
         try:
             results: list[str] = []
-            async with aiohttp.ClientSession() as session:
-                # pkg.go.dev search API returns popular modules sorted by relevance
-                for query in ("", "github.com", "google.golang.org", "go.uber.org"):
-                    if len(results) >= n:
-                        break
-                    url = "https://pkg.go.dev/search"
-                    params = {"q": query, "m": "package", "limit": min(n, 100)}
-                    resp = await retry_request(session, "GET", url, params=params, timeout=_TIMEOUT)
-                    async with resp:
-                        if resp.status != 200:
-                            continue
-                        text = await resp.text()
-                    # Parse module paths from search result HTML
-                    # Each result has data-href="/mod/github.com/..." or similar
-                    import re
+            # pkg.go.dev search API returns popular modules sorted by relevance
+            for query in ("", "github.com", "google.golang.org", "go.uber.org"):
+                if len(results) >= n:
+                    break
+                url = "https://pkg.go.dev/search"
+                params = {"q": query, "m": "package", "limit": min(n, 100)}
+                resp = await retry_request(session, "GET", url, params=params, timeout=_TIMEOUT)
+                async with resp:
+                    if resp.status != 200:
+                        continue
+                    text = await resp.text()
+                # Parse module paths from search result HTML
+                # Each result has data-href="/mod/github.com/..." or similar
+                import re
 
-                    for m in re.finditer(r'data-href="/(?:mod/)?([^"@?]+)"', text):
-                        mod = m.group(1).strip("/")
-                        if mod and mod not in results and "." in mod:
-                            results.append(mod)
-                            if len(results) >= n:
-                                break
+                for m in re.finditer(r'data-href="/(?:mod/)?([^"@?]+)"', text):
+                    mod = m.group(1).strip("/")
+                    if mod and mod not in results and "." in mod:
+                        results.append(mod)
+                        if len(results) >= n:
+                            break
             if results:
                 return results[:n]
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.warning("Failed to fetch Go top-N from pkg.go.dev: %s", e)
+        finally:
+            if close_session:
+                await session.close()
 
         return self._POPULAR_FALLBACK[:n]
 

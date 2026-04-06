@@ -8,6 +8,7 @@ import xmlrpc.client  # nosec B411 — hardened via defusedxml monkey_patch belo
 from datetime import datetime, timezone
 
 import aiohttp
+from typing import Optional
 
 from depvet.http import retry_request, retry_sync
 from depvet.models.package import Release
@@ -38,7 +39,12 @@ class PyPIMonitor(BaseRegistryMonitor):
     def ecosystem(self) -> str:
         return "pypi"
 
-    async def get_new_releases(self, watchlist, since_state):
+    async def get_new_releases(
+        self,
+        watchlist: set[str],
+        since_state: dict,
+        session: Optional[aiohttp.ClientSession] = None,
+    ):
         serial = since_state.get("serial", 0)
         if serial == 0:
             serial = await self._get_current_serial()
@@ -55,7 +61,7 @@ class PyPIMonitor(BaseRegistryMonitor):
             if key in seen:
                 continue
             seen.add(key)
-            prev = await self._get_previous_version(name, version)
+            prev = await self._get_previous_version(name, version, session=session)
             published_at = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
             releases.append(
                 Release(
@@ -69,22 +75,27 @@ class PyPIMonitor(BaseRegistryMonitor):
             )
         return releases, {"serial": new_serial}
 
-    async def load_top_n(self, n):
+    async def load_top_n(self, n: int, session: Optional[aiohttp.ClientSession] = None):
+        close_session = session is None
+        if session is None:
+            session = aiohttp.ClientSession()
         try:
-            async with aiohttp.ClientSession() as session:
-                resp = await retry_request(
-                    session,
-                    "GET",
-                    TOP_PACKAGES_URL,
-                    timeout=_TIMEOUT,
-                )
-                async with resp:
-                    data = await resp.json(content_type=None)
+            resp = await retry_request(
+                session,
+                "GET",
+                TOP_PACKAGES_URL,
+                timeout=_TIMEOUT,
+            )
+            async with resp:
+                data = await resp.json(content_type=None)
             rows = data.get("rows", [])
             return [r["project"] for r in rows[:n]]
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.error(f"Failed to load top PyPI packages: {e}")
             return []
+        finally:
+            if close_session:
+                await session.close()
 
     async def _get_current_serial(self):
         loop = asyncio.get_event_loop()
@@ -112,15 +123,17 @@ class PyPIMonitor(BaseRegistryMonitor):
             logger.error(f"PyPI changelog_since_serial failed: {e}")
             return []
 
-    async def _get_previous_version(self, name, version):
+    async def _get_previous_version(self, name, version, session: Optional[aiohttp.ClientSession] = None):
+        close_session = session is None
+        if session is None:
+            session = aiohttp.ClientSession()
         try:
             url = f"https://pypi.org/pypi/{name}/json"
-            async with aiohttp.ClientSession() as session:
-                resp = await retry_request(session, "GET", url, timeout=_TIMEOUT)
-                async with resp:
-                    if resp.status != 200:
-                        return None
-                    data = await resp.json()
+            resp = await retry_request(session, "GET", url, timeout=_TIMEOUT)
+            async with resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
             releases = sort_versions(list(data.get("releases", {}).keys()), "pypi")
             if version in releases:
                 idx = releases.index(version)
@@ -128,4 +141,7 @@ class PyPIMonitor(BaseRegistryMonitor):
                     return releases[idx - 1]
         except (aiohttp.ClientError, asyncio.TimeoutError, KeyError) as e:
             logger.debug(f"Could not get previous version for {name}=={version}: {e}")
+        finally:
+            if close_session:
+                await session.close()
         return None

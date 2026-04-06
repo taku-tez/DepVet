@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timezone
 
 import aiohttp
+from typing import Optional
 
 from depvet.models.package import Release
 from depvet.registry.base import BaseRegistryMonitor
@@ -36,6 +37,7 @@ class MavenMonitor(BaseRegistryMonitor):
         self,
         watchlist: set[str],
         since_state: dict,
+        session: Optional[aiohttp.ClientSession] = None,
     ) -> tuple[list[Release], dict]:
         if not watchlist:
             return [], since_state
@@ -44,7 +46,10 @@ class MavenMonitor(BaseRegistryMonitor):
         releases: list[Release] = []
         new_known: dict[str, str] = dict(known_versions)
 
-        async with aiohttp.ClientSession() as session:
+        close_session = session is None
+        if session is None:
+            session = aiohttp.ClientSession()
+        try:
             for artifact in watchlist:
                 if ":" not in artifact:
                     logger.warning(f"Maven artifact should be 'groupId:artifactId': {artifact}")
@@ -84,10 +89,13 @@ class MavenMonitor(BaseRegistryMonitor):
 
                 except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                     logger.warning(f"Failed to check Maven artifact {artifact}: {e}")
+        finally:
+            if close_session:
+                await session.close()
 
         return releases, {"artifacts": new_known}
 
-    async def load_top_n(self, n: int) -> list[str]:
+    async def load_top_n(self, n: int, session: Optional[aiohttp.ClientSession] = None) -> list[str]:
         """Return popular Maven artifacts."""
         popular = [
             "com.fasterxml.jackson.core:jackson-databind",

@@ -548,6 +548,11 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
     _last_top_n_refresh = 0.0  # timestamp of last top-N refresh
     refresh_interval = config.watchlist.refresh_interval  # seconds between top-N refreshes
 
+    # Shared HTTP session for the entire monitor lifecycle
+    import aiohttp as _aiohttp
+
+    _shared_session = _aiohttp.ClientSession()
+
     async def _refresh_top_n() -> None:
         """Load/reload top-N packages from registries into ephemeral_top."""
         for mon in monitors:
@@ -560,7 +565,7 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                 n = config.watchlist.top_n_pypi
             if n > 0 and "top_n" in active_sources:
                 click.echo(f"  Loading top-{n} {eco} packages (ephemeral)...")
-                pkgs = await mon.load_top_n(n)
+                pkgs = await mon.load_top_n(n, session=_shared_session)
                 ephemeral_top[eco] = set(pkgs)
                 click.echo(f"  → {len(pkgs)} packages added to ephemeral set")
 
@@ -600,116 +605,125 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                 await _refresh_top_n()
                 _last_top_n_refresh = _time.monotonic()
 
+        # --- Parallel registry polling ---
+        # Build per-ecosystem watchlists
+        use_explicit = not config.watchlist.sources or "explicit" in config.watchlist.sources
+        poll_args: list[tuple] = []  # (monitor, watchlist_set, since_state)
         for mon in monitors:
             eco = mon.ecosystem
-            # Build watchlist according to active sources
-            # 'explicit': use persisted watchlist; 'top_n': use ephemeral top-N
-            # If sources is empty or contains 'explicit', always include explicit entries
-            use_explicit = not config.watchlist.sources or "explicit" in config.watchlist.sources
             explicit_set = wl.as_set(eco) if use_explicit else set()
             watchlist_set = explicit_set | ephemeral_top.get(eco, set())
-            if not watchlist_set:
-                continue
+            if watchlist_set:
+                poll_args.append((mon, watchlist_set, state.get(eco)))
 
-            since = state.get(eco)
-            releases, new_state = await mon.get_new_releases(watchlist_set, since)
-            # NOTE: state.set() is deferred until after processing to avoid
-            # losing releases when batch is truncated by queue_max_size.
+        # Poll all ecosystems in parallel
+        async def _poll_one(mon, ws, since):
+            return mon.ecosystem, await mon.get_new_releases(ws, since, session=_shared_session)
+
+        poll_results = await asyncio.gather(
+            *[_poll_one(m, ws, s) for m, ws, s in poll_args],
+            return_exceptions=True,
+        )
+
+        # Process results
+        async def _process_one(release, _eco):
+            click.echo(f"    📦 {release.name} {release.version}")
+            if no_analyze or not release.previous_version:
+                from depvet.models.alert import AlertEvent
+                from depvet.models.verdict import Verdict, VerdictType, Severity, DiffStats
+                from datetime import datetime, timezone
+
+                notify_verdict = Verdict(
+                    verdict=VerdictType.UNKNOWN,
+                    severity=Severity.MEDIUM,
+                    confidence=0.0,
+                    summary=(
+                        "新規リリースを検出（LLM解析はスキップ）"
+                        if no_analyze
+                        else "新規パッケージの初回リリースを検出（差分比較不可）"
+                    ),
+                    findings=[],
+                    analysis_duration_ms=0,
+                    diff_stats=DiffStats(files_changed=0, lines_added=0, lines_removed=0),
+                    model="none",
+                    analyzed_at=datetime.now(timezone.utc).isoformat(),
+                    chunks_analyzed=0,
+                    tokens_used=0,
+                )
+                notify_event = AlertEvent(release=release, verdict=notify_verdict)
+                await router.dispatch(notify_event)
+                return
+            try:
+                async with _sem:
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        tmp = Path(tmpdir)
+                        from depvet.differ.downloader import download_package
+                        from depvet.differ.unpacker import unpack
+                        from depvet.differ.diff_generator import generate_diff
+
+                        (tmp / "old").mkdir()
+                        (tmp / "new").mkdir()
+                        old_arch = await download_package(
+                            release.name, release.previous_version, _eco, tmp / "old", session=_shared_session
+                        )
+                        new_arch = await download_package(
+                            release.name, release.version, _eco, tmp / "new", session=_shared_session
+                        )
+                        if not old_arch or not new_arch:
+                            return
+
+                        old_dir = unpack(old_arch, tmp / "uo")
+                        new_dir = unpack(new_arch, tmp / "un")
+                        chunks, stats = generate_diff(old_dir, new_dir)
+
+                        if not chunks:
+                            return
+
+                        triage = TriageAnalyzer(analyzer)
+                        should, reason, rule_matches = await triage.should_analyze(
+                            chunks, release.name, release.previous_version, release.version
+                        )
+                        if not should:
+                            return
+
+                        from depvet.analyzer.version_signal import get_transition_context
+
+                        version_ctx = await get_transition_context(
+                            release.name,
+                            release.previous_version,
+                            release.version,
+                            _eco,
+                        )
+
+                        deep = DeepAnalyzer(analyzer)
+                        verdict = await deep.analyze(
+                            chunks=chunks,
+                            package_name=release.name,
+                            old_version=release.previous_version,
+                            new_version=release.version,
+                            ecosystem=_eco,
+                            diff_stats=stats,
+                            rule_matches=rule_matches,
+                            version_context=version_ctx,
+                        )
+
+                        event = AlertEvent(release=release, verdict=verdict)
+                        await router.dispatch(event)
+                        metrics.record_analysis(verdict.tokens_used, verdict.analysis_duration_ms)
+                metrics.record_release(_eco)
+            except Exception as e:  # Outermost catch-all for entire analysis pipeline
+                logger.error(f"Analysis failed for {release.name}: {e}")
+
+        for result in poll_results:
+            if isinstance(result, BaseException):
+                logger.error(f"Registry polling failed: {result}")
+                continue
+            eco, (releases, new_state) = result
 
             if releases:
                 click.echo(f"  [{eco}] {len(releases)} new release(s)")
 
-            async def _process_one(release, _eco=eco):
-                click.echo(f"    📦 {release.name} {release.version}")
-                if no_analyze or not release.previous_version:
-                    # Release-only notification: dispatch to alert backends without LLM analysis
-                    from depvet.models.alert import AlertEvent
-                    from depvet.models.verdict import Verdict, VerdictType, Severity, DiffStats
-                    from datetime import datetime, timezone
-
-                    notify_verdict = Verdict(
-                        verdict=VerdictType.UNKNOWN,
-                        severity=Severity.MEDIUM,  # visible by default min_severity
-                        confidence=0.0,
-                        summary=(
-                            "新規リリースを検出（LLM解析はスキップ）"
-                            if no_analyze
-                            else "新規パッケージの初回リリースを検出（差分比較不可）"
-                        ),
-                        findings=[],
-                        analysis_duration_ms=0,
-                        diff_stats=DiffStats(files_changed=0, lines_added=0, lines_removed=0),
-                        model="none",
-                        analyzed_at=datetime.now(timezone.utc).isoformat(),
-                        chunks_analyzed=0,
-                        tokens_used=0,
-                    )
-                    notify_event = AlertEvent(release=release, verdict=notify_verdict)
-                    await router.dispatch(notify_event)
-                    return
-                try:
-                    async with _sem:
-                        with tempfile.TemporaryDirectory() as tmpdir:
-                            tmp = Path(tmpdir)
-                            from depvet.differ.downloader import download_package
-                            from depvet.differ.unpacker import unpack
-                            from depvet.differ.diff_generator import generate_diff
-
-                            (tmp / "old").mkdir()
-                            (tmp / "new").mkdir()
-                            old_arch = await download_package(release.name, release.previous_version, _eco, tmp / "old")
-                            new_arch = await download_package(release.name, release.version, _eco, tmp / "new")
-                            if not old_arch or not new_arch:
-                                return
-
-                            old_dir = unpack(old_arch, tmp / "uo")
-                            new_dir = unpack(new_arch, tmp / "un")
-                            chunks, stats = generate_diff(old_dir, new_dir)
-
-                            if not chunks:
-                                return
-
-                            triage = TriageAnalyzer(analyzer)
-                            should, reason, rule_matches = await triage.should_analyze(
-                                chunks, release.name, release.previous_version, release.version
-                            )
-                            if not should:
-                                return
-
-                            # Fetch version transition context (same as scan path)
-                            from depvet.analyzer.version_signal import get_transition_context
-
-                            version_ctx = await get_transition_context(
-                                release.name,
-                                release.previous_version,
-                                release.version,
-                                _eco,
-                            )
-
-                            deep = DeepAnalyzer(analyzer)
-                            verdict = await deep.analyze(
-                                chunks=chunks,
-                                package_name=release.name,
-                                old_version=release.previous_version,
-                                new_version=release.version,
-                                ecosystem=_eco,
-                                diff_stats=stats,
-                                rule_matches=rule_matches,
-                                version_context=version_ctx,
-                            )
-
-                            event = AlertEvent(release=release, verdict=verdict)
-                            await router.dispatch(event)
-                            metrics.record_analysis(verdict.tokens_used, verdict.analysis_duration_ms)
-                    metrics.record_release(_eco)
-                except Exception as e:  # Outermost catch-all for entire analysis pipeline
-                    logger.error(f"Analysis failed for {release.name}: {e}")
-
             if releases:
-                # Apply batch limit: process at most _batch_limit releases per cycle
-                # (0 = unlimited).  Truncated releases are NOT lost — state is only
-                # advanced when all releases are consumed, so overflow releases will
-                # be re-fetched on the next poll cycle.
                 truncated = 0 < _batch_limit < len(releases)
                 batch = releases if _batch_limit <= 0 else releases[:_batch_limit]
                 if truncated:
@@ -718,12 +732,10 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                         f"queue_max_size={_batch_limit}; processing {len(batch)}, "
                         f"remaining {len(releases) - len(batch)} deferred to next cycle"
                     )
-                tasks = [asyncio.create_task(_process_one(r)) for r in batch]
+                tasks = [asyncio.create_task(_process_one(r, eco)) for r in batch]
                 await asyncio.gather(*tasks)
 
-            # Only advance polling state when the full batch was consumed.
-            # If truncated, keep the old state so overflow releases are
-            # re-fetched on the next poll cycle.
+            # Only advance state when full batch consumed
             if not releases or not (0 < _batch_limit < len(releases)):
                 state.set(eco, new_state)
 
@@ -739,6 +751,9 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
             break  # shutdown requested during sleep
         except asyncio.TimeoutError:
             pass  # normal: interval elapsed
+
+    # --- Cleanup shared session ---
+    await _shared_session.close()
 
     # --- Shutdown summary ---
     metrics.alerts_sent = router.dispatched_count
