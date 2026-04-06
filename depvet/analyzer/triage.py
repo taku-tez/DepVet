@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+
+import aiohttp
 
 from depvet.analyzer.base import BaseAnalyzer
 from depvet.analyzer.rules import scan_diff_full, is_likely_benign, RuleMatch
@@ -157,7 +160,7 @@ class TriageAnalyzer:
                                                     cwe="CWE-1021",
                                                 )
                                             )
-                                    except Exception as rep_err:
+                                    except (aiohttp.ClientError, asyncio.TimeoutError) as rep_err:
                                         logger.debug(f"Reputation check failed for {dep_name}: {rep_err}")
                                         all_rule_matches.append(
                                             RuleMatch(
@@ -230,7 +233,7 @@ class TriageAnalyzer:
         # ── Phase 5: LLM triage as final arbiter ───────────────────────────
         try:
             should, reason = await self.analyzer.triage(chunks[0], package_name, old_version, new_version)
-        except Exception as e:
+        except Exception as e:  # LLM SDK may raise various errors; fail-safe to analyze
             logger.warning(f"LLM triage failed, defaulting to analyze: {e}")
             return True, f"LLM triage error (fail-safe): {e}", all_rule_matches
         if should:

@@ -32,7 +32,7 @@ class WatchlistManager:
                 data = yaml.safe_load(f) or {}
             for entry in data.get("packages", []):
                 self._explicit.add(entry["name"], entry.get("ecosystem", "pypi"))
-        except Exception as e:
+        except (yaml.YAMLError, OSError, KeyError) as e:
             logger.warning(f"Failed to load watchlist: {e}")
 
     def _save(self) -> None:

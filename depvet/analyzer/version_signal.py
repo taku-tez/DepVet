@@ -13,6 +13,7 @@ Signals:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -155,7 +156,7 @@ async def analyze_pypi_transition(
             if resp.status != 200:
                 return ctx
             data = await resp.json()
-    except Exception as e:
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         logger.debug(f"PyPI metadata fetch failed for {name}: {e}")
         return ctx
     finally:
@@ -237,7 +238,7 @@ async def analyze_npm_transition(
             if resp.status != 200:
                 return ctx
             data = await resp.json(content_type=None)
-    except Exception as e:
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         logger.debug(f"npm metadata fetch failed for {name}: {e}")
         return ctx
     finally:
@@ -257,7 +258,7 @@ async def analyze_npm_transition(
             gap_days = (new_ts - old_ts).days
             ctx.days_since_last_release = gap_days
             _detect_dormancy(name, gap_days, ctx)
-        except Exception:
+        except (ValueError, TypeError, KeyError):
             pass
 
     # --- Signal: Maintainer change (npm uses maintainers array) ---
@@ -337,7 +338,7 @@ async def get_transition_context(
             return await analyze_go_transition(name, old_version, new_version)
         elif ecosystem == "cargo":
             return await analyze_cargo_transition(name, old_version, new_version)
-    except Exception as e:
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
         logger.warning(f"Version transition analysis failed for {name}: {e}")
     return None
 
@@ -351,7 +352,7 @@ async def _get_version_info_pypi(name: str, version: str) -> Optional[dict]:
                 if resp.status == 200:
                     data = await resp.json()
                     return data.get("info", {})
-    except Exception:
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
         pass
     return None
 
@@ -364,7 +365,7 @@ def _extract_upload_time(files: list[dict]) -> Optional[datetime]:
         if ts_str:
             try:
                 times.append(datetime.fromisoformat(ts_str.replace("Z", "+00:00")))
-            except Exception:
+            except (ValueError, TypeError, KeyError):
                 pass
     return min(times) if times else None
 
@@ -585,7 +586,7 @@ async def analyze_go_transition(
                             old_info = await resp.json(content_type=None)
                         else:
                             new_info = await resp.json(content_type=None)
-            except Exception:
+            except (ValueError, TypeError, KeyError):
                 pass
 
         # --- Signal: Dormancy ---
@@ -600,7 +601,7 @@ async def analyze_go_transition(
                     ctx.days_since_last_release = gap_days
                     _detect_dormancy(name, gap_days, ctx)
 
-                except Exception:
+                except (ValueError, TypeError, KeyError):
                     pass
 
         # --- Signal: VCS origin changed (module hijacking indicator) ---
@@ -617,7 +618,7 @@ async def analyze_go_transition(
                     )
                 )
 
-    except Exception as e:
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
         logger.warning(f"Go transition analysis failed for {name}: {e}")
     finally:
         if close_session:
@@ -671,7 +672,7 @@ async def analyze_cargo_transition(
                         gap_days = (new_ts - old_ts).days
                         ctx.days_since_last_release = gap_days
                         _detect_dormancy(name, gap_days, ctx)
-                    except Exception:
+                    except (ValueError, TypeError, KeyError):
                         pass
 
             # --- Signal: Yanked version update (publishing yanked → then a new version) ---
@@ -688,7 +689,7 @@ async def analyze_cargo_transition(
         # Note: crates.io does not expose per-version owner history via public API.
         # Owner change detection would require audit log access (not available).
 
-    except Exception as e:
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
         logger.warning(f"Cargo transition analysis failed for {name}: {e}")
     finally:
         if close_session:

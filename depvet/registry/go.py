@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -84,7 +85,7 @@ class GoModulesMonitor(BaseRegistryMonitor):
                         )
                         new_known[module] = latest
 
-                except Exception as e:
+                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                     logger.warning(f"Failed to check Go module {module}: {e}")
 
         return releases, {"modules": new_known}
@@ -144,7 +145,7 @@ class GoModulesMonitor(BaseRegistryMonitor):
                                 break
             if results:
                 return results[:n]
-        except Exception as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.warning("Failed to fetch Go top-N from pkg.go.dev: %s", e)
 
         return self._POPULAR_FALLBACK[:n]
@@ -173,6 +174,6 @@ class GoModulesMonitor(BaseRegistryMonitor):
             async with resp:
                 if resp.status == 200:
                     return await resp.json(content_type=None)
-        except Exception:
+        except (aiohttp.ClientError, asyncio.TimeoutError):
             pass
         return {}

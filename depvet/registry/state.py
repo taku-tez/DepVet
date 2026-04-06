@@ -23,7 +23,7 @@ class PollingState:
             try:
                 with open(self._path) as f:
                     self._data = yaml.safe_load(f) or {}
-            except Exception as e:
+            except (yaml.YAMLError, OSError) as e:
                 logger.warning(f"Failed to load state from {self._path}: {e}")
                 self._data = {}
 

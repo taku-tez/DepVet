@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -86,7 +87,7 @@ class CargoMonitor(BaseRegistryMonitor):
                         )
                         new_known[crate] = latest["num"]
 
-                except Exception as e:
+                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                     logger.warning(f"Failed to check Cargo crate {crate}: {e}")
 
         return releases, {"crates": new_known}
@@ -118,7 +119,7 @@ class CargoMonitor(BaseRegistryMonitor):
                     if len(crates) < 100:
                         break
                 return results[:n]
-        except Exception as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.error(f"Failed to load top Cargo crates: {e}")
             return []
 

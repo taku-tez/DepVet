@@ -82,7 +82,7 @@ class PyPIMonitor(BaseRegistryMonitor):
                     data = await resp.json(content_type=None)
             rows = data.get("rows", [])
             return [r["project"] for r in rows[:n]]
-        except Exception as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.error(f"Failed to load top PyPI packages: {e}")
             return []
 
@@ -95,7 +95,7 @@ class PyPIMonitor(BaseRegistryMonitor):
                 lambda: retry_sync(client.changelog_last_serial),
             )
             return int(serial)
-        except Exception as e:
+        except (ConnectionError, OSError, xmlrpc.client.Fault) as e:
             logger.warning(f"Failed to get current serial: {e}")
             return 0
 
@@ -108,7 +108,7 @@ class PyPIMonitor(BaseRegistryMonitor):
                 lambda: retry_sync(client.changelog_since_serial, serial),
             )
             return events or []
-        except Exception as e:
+        except (ConnectionError, OSError, xmlrpc.client.Fault) as e:
             logger.error(f"PyPI changelog_since_serial failed: {e}")
             return []
 
@@ -126,6 +126,6 @@ class PyPIMonitor(BaseRegistryMonitor):
                 idx = releases.index(version)
                 if idx > 0:
                     return releases[idx - 1]
-        except Exception as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError, KeyError) as e:
             logger.debug(f"Could not get previous version for {name}=={version}: {e}")
         return None

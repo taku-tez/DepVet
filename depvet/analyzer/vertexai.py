@@ -119,7 +119,7 @@ class VertexClaudeAnalyzer(BaseAnalyzer):
             text = getattr(response.content[0], "text", "{}") if response.content else "{}"
             data = _extract_json(text)
             return bool(data.get("should_analyze", True)), data.get("reason", "")
-        except Exception as e:
+        except Exception as e:  # LLM SDK may raise various errors; fail-safe to analyze
             logger.warning(f"Vertex Claude triage failed, defaulting to analyze: {e}")
             return True, f"triage error: {e}"
 
@@ -175,7 +175,7 @@ class VertexClaudeAnalyzer(BaseAnalyzer):
             )
             text = getattr(response.content[0], "text", "{}") if response.content else "{}"
             return _extract_json(text)
-        except Exception as e:
+        except Exception as e:  # LLM SDK may raise various errors; fail-safe to analyze
             logger.error(f"Vertex Claude deep analysis failed: {e}")
             return {"verdict": "UNKNOWN", "confidence": 0.0, "error": str(e)}
 
@@ -268,7 +268,7 @@ class VertexGeminiAnalyzer(BaseAnalyzer):
             text = await self._call(self.triage_model, prompt, 256)
             data = _extract_json(text)
             return bool(data.get("should_analyze", True)), data.get("reason", "")
-        except Exception as e:
+        except Exception as e:  # LLM SDK may raise various errors; fail-safe to analyze
             logger.warning(f"Vertex Gemini triage failed: {e}")
             return True, f"triage error: {e}"
 
@@ -319,6 +319,6 @@ class VertexGeminiAnalyzer(BaseAnalyzer):
         try:
             text = await self._call(self.model, prompt, self.max_tokens)
             return _extract_json(text)
-        except Exception as e:
+        except Exception as e:  # LLM SDK may raise various errors; fail-safe to analyze
             logger.error(f"Vertex Gemini deep analysis failed: {e}")
             return {"verdict": "UNKNOWN", "confidence": 0.0, "error": str(e)}

@@ -150,6 +150,8 @@ def scan(
 
 
 async def _scan(config, package, old_version, new_version, ecosystem, json_output, no_triage):
+    import aiohttp
+
     from depvet.differ.downloader import download_package
     from depvet.differ.unpacker import unpack
     from depvet.differ.diff_generator import generate_diff
@@ -213,7 +215,7 @@ async def _scan(config, package, old_version, new_version, ecosystem, json_outpu
             if version_ctx and version_ctx.signals:
                 for sig in version_ctx.signals:
                     click.echo(f"  ⚠️  [{sig.severity}] {sig.description}")
-        except Exception as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
             logger.debug(f"Version signal fetch failed: {e}")
 
         deep = DeepAnalyzer(analyzer)
@@ -702,7 +704,7 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                             event = AlertEvent(release=release, verdict=verdict)
                             await router.dispatch(event)
                     releases_processed += 1
-                except Exception as e:
+                except Exception as e:  # Outermost catch-all for entire analysis pipeline
                     logger.error(f"Analysis failed for {release.name}: {e}")
 
             if releases:

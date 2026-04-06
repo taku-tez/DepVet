@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import aiohttp
@@ -67,7 +68,7 @@ class OSVChecker:
                         logger.warning(f"OSV API returned {resp.status}")
                         return []
                     data = await resp.json()
-        except Exception as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.error(f"OSV API request failed: {e}")
             return []
 
@@ -138,7 +139,7 @@ class OSVChecker:
                         logger.warning(f"OSV batch API returned {resp.status}")
                         return results
                     data = await resp.json()
-        except Exception as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.error(f"OSV batch API failed: {e}")
             return results
 

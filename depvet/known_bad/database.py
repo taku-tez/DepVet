@@ -56,7 +56,7 @@ class KnownBadDB:
                 self._entries.append(entry)
                 self._index[(entry.name, entry.version, entry.ecosystem)] = entry
             logger.info(f"Loaded {len(self._entries)} known-bad entries")
-        except Exception as e:
+        except (json.JSONDecodeError, OSError, KeyError) as e:
             logger.error(f"Failed to load known-bad DB: {e}")
 
     def lookup(self, name: str, version: str, ecosystem: str) -> Optional[KnownBadEntry]:

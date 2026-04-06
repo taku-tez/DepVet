@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -81,7 +82,7 @@ class MavenMonitor(BaseRegistryMonitor):
                         )
                         new_known[artifact] = latest["version"]
 
-                except Exception as e:
+                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                     logger.warning(f"Failed to check Maven artifact {artifact}: {e}")
 
         return releases, {"artifacts": new_known}

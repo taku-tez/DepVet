@@ -6,6 +6,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from depvet.exceptions import DepVetError
 from depvet.models.alert import AlertEvent
 from depvet.models.verdict import Severity, VerdictType
 
@@ -23,7 +24,7 @@ SEVERITY_ORDER = {
 }
 
 
-class AlertDeliveryError(Exception):
+class AlertDeliveryError(DepVetError):
     """Raised when an alerter fails to deliver an alert after retries."""
 
 

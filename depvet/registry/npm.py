@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -49,7 +50,7 @@ class NpmMonitor(BaseRegistryMonitor):
                         logger.warning(f"npm _changes returned {resp.status}")
                         return [], since_state
                     data = await resp.json(content_type=None)
-        except Exception as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.error(f"npm _changes feed failed: {e}")
             return [], since_state
         results = data.get("results", [])
@@ -73,7 +74,7 @@ class NpmMonitor(BaseRegistryMonitor):
             published_raw = time_data.get(latest, "")
             try:
                 published_at = datetime.fromisoformat(published_raw.replace("Z", "+00:00")).isoformat()
-            except Exception:
+            except (ValueError, TypeError):
                 published_at = datetime.now(timezone.utc).isoformat()
             releases.append(
                 Release(
@@ -97,6 +98,6 @@ class NpmMonitor(BaseRegistryMonitor):
                         return []
                     data = await resp.json(content_type=None)
             return [obj["package"]["name"] for obj in data.get("objects", [])]
-        except Exception as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.error(f"Failed to load top npm packages: {e}")
             return []

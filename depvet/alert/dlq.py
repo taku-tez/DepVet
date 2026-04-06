@@ -61,7 +61,7 @@ class DeadLetterQueue:
             with open(self._path) as f:
                 data = yaml.safe_load(f)
             self._entries = data if isinstance(data, list) else []
-        except Exception as e:
+        except (yaml.YAMLError, OSError) as e:
             logger.warning("DLQ file corrupt, starting empty: %s", e)
             self._entries = []
 

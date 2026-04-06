@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +29,7 @@ class TopNSource:
                     self._cache[ecosystem] = pkgs
                     self._last_refresh[ecosystem] = now
                     logger.info(f"Refreshed top-{n} {ecosystem} packages")
-                except Exception as e:
+                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                     logger.error(f"Failed to refresh top-{n} {ecosystem}: {e}")
                     if ecosystem not in self._cache:
                         return set()

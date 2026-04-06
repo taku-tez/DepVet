@@ -27,6 +27,7 @@ Design principle:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -94,7 +95,7 @@ async def _fetch_npm_metadata(name: str, session: aiohttp.ClientSession) -> Opti
                 logger.debug(f"npm registry returned {resp.status} for {name}")
                 return None
             return await resp.json(content_type=None)
-    except Exception as e:
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         logger.debug(f"Failed to fetch npm metadata for {name}: {e}")
         return None
 
@@ -109,7 +110,7 @@ async def _fetch_npm_downloads(name: str, session: aiohttp.ClientSession) -> Opt
                 return None
             data = await resp.json(content_type=None)
             return data.get("downloads", 0)
-    except Exception as e:
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         logger.debug(f"Failed to fetch npm downloads for {name}: {e}")
         return None
 
@@ -125,7 +126,7 @@ async def _fetch_pypi_metadata(name: str, session: aiohttp.ClientSession) -> Opt
                 logger.debug(f"PyPI returned {resp.status} for {name}")
                 return None
             return await resp.json(content_type=None)
-    except Exception as e:
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         logger.debug(f"Failed to fetch PyPI metadata for {name}: {e}")
         return None
 
@@ -138,7 +139,7 @@ def _days_since(iso_ts: str) -> Optional[int]:
     try:
         ts = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
         return (datetime.now(timezone.utc) - ts).days
-    except Exception:
+    except (ValueError, TypeError):
         return None
 
 

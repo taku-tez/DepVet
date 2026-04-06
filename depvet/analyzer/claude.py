@@ -90,7 +90,7 @@ class ClaudeAnalyzer(BaseAnalyzer):
             text = getattr(response.content[0], "text", "{}") if response.content else "{}"
             data = _extract_json(text)
             return bool(data.get("should_analyze", True)), data.get("reason", "")
-        except Exception as e:
+        except Exception as e:  # LLM SDK may raise various errors; fail-safe to analyze
             logger.warning(f"Triage failed, defaulting to analyze: {e}")
             return True, f"triage error: {e}"
 

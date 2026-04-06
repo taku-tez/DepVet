@@ -170,7 +170,7 @@ class SBOMParser:
                             if entry:
                                 entries.append(entry)
                     break
-        except Exception as e:
+        except (ValueError, KeyError, SyntaxError) as e:
             logger.error(f"XML parse error: {e}")
         return entries
 
@@ -218,7 +218,7 @@ class SBOMParser:
                                 entries.append(entry)
                 if entries:
                     break
-        except Exception as e:
+        except (ValueError, KeyError, SyntaxError) as e:
             logger.error(f"SPDX XML parse error: {e}")
         return entries
 
