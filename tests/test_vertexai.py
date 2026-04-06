@@ -53,31 +53,31 @@ def _mock_gemini_client(response_text: str = '{"should_analyze": true}'):
 
 class TestExtractJson:
     def test_plain_json(self):
-        from depvet.analyzer.vertexai import _extract_json
+        from depvet.analyzer.prompt_util import extract_json as _extract_json
 
         assert _extract_json('{"verdict": "BENIGN"}') == {"verdict": "BENIGN"}
 
     def test_markdown_code_block(self):
-        from depvet.analyzer.vertexai import _extract_json
+        from depvet.analyzer.prompt_util import extract_json as _extract_json
 
         text = '```json\n{"verdict": "MALICIOUS"}\n```'
         assert _extract_json(text) == {"verdict": "MALICIOUS"}
 
     def test_markdown_without_json_lang(self):
-        from depvet.analyzer.vertexai import _extract_json
+        from depvet.analyzer.prompt_util import extract_json as _extract_json
 
         text = '```\n{"verdict": "SUSPICIOUS"}\n```'
         assert _extract_json(text) == {"verdict": "SUSPICIOUS"}
 
     def test_json_embedded_in_text(self):
-        from depvet.analyzer.vertexai import _extract_json
+        from depvet.analyzer.prompt_util import extract_json as _extract_json
 
         text = 'Here is the result: {"verdict": "BENIGN", "confidence": 0.9}'
         result = _extract_json(text)
         assert result["verdict"] == "BENIGN"
 
     def test_invalid_json_raises(self):
-        from depvet.analyzer.vertexai import _extract_json
+        from depvet.analyzer.prompt_util import extract_json as _extract_json
 
         with pytest.raises(json.JSONDecodeError):
             _extract_json("not json at all")
@@ -85,16 +85,16 @@ class TestExtractJson:
 
 class TestSafeFormat:
     def test_replaces_known_vars(self):
-        from depvet.analyzer.vertexai import _safe_format
+        from depvet.analyzer.prompt_util import safe_format
 
-        result = _safe_format("Hello {name} v{version}", name="pkg", version="1.0")
+        result = safe_format("Hello {name} v{version}", name="pkg", version="1.0")
         assert result == "Hello pkg v1.0"
 
     def test_leaves_unknown_braces(self):
-        from depvet.analyzer.vertexai import _safe_format
+        from depvet.analyzer.prompt_util import safe_format
 
         # JSON example in template should not be mangled
-        result = _safe_format('{"example": {unknown}} {name}', name="test")
+        result = safe_format('{"example": {unknown}} {name}', name="test")
         assert "{unknown}" in result
         assert "test" in result
 

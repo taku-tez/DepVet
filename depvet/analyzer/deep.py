@@ -89,66 +89,61 @@ class VerdictMerger:
         version_context: VersionTransitionContext | None = None,
     ) -> Verdict:
         if not raw_verdicts:
-            return Verdict(
-                verdict=VerdictType.UNKNOWN,
-                severity=Severity.NONE,
-                confidence=0.0,
-                findings=[],
-                summary="分析結果なし",
-                analysis_duration_ms=int(time.time() * 1000) - start_ms,
-                diff_stats=diff_stats,
-                model=model,
-                analyzed_at=datetime.now(timezone.utc).isoformat(),
-                chunks_analyzed=0,
-                tokens_used=0,
-            )
-
-        # Find strictest verdict
-        best_verdict_raw = max(
-            raw_verdicts,
-            key=lambda r: VERDICT_PRIORITY.get(VerdictType(r.get("verdict", "UNKNOWN")), 0),
-        )
-        best_verdict_type = VerdictType(best_verdict_raw.get("verdict", "UNKNOWN"))
-
-        # Find highest severity
-        all_severities = [Severity(r.get("severity", "NONE")) for r in raw_verdicts]
-        best_severity = max(all_severities, key=lambda s: SEVERITY_ORDER.get(s, 0))
-
-        # Weighted confidence
-        total_findings = sum(len(r.get("findings", [])) for r in raw_verdicts)
-        if total_findings == 0:
-            confidence = sum(r.get("confidence", 0.5) for r in raw_verdicts) / len(raw_verdicts)
+            # LLM produced no results — start with UNKNOWN baseline, then let
+            # rule_matches and version_context escalate the verdict below.
+            best_verdict_type = VerdictType.UNKNOWN
+            best_severity = Severity.NONE
+            confidence = 0.0
+            summary = "LLM分析結果なし（静的解析のみ）"
+            merged_findings: list[Finding] = []
+            tokens_used = 0
         else:
-            weighted = sum(r.get("confidence", 0.5) * len(r.get("findings", [])) for r in raw_verdicts)
-            confidence = weighted / total_findings
+            # Find strictest verdict
+            best_verdict_raw = max(
+                raw_verdicts,
+                key=lambda r: VERDICT_PRIORITY.get(VerdictType(r.get("verdict", "UNKNOWN")), 0),
+            )
+            best_verdict_type = VerdictType(best_verdict_raw.get("verdict", "UNKNOWN"))
 
-        # Deduplicate findings by (file, category)
-        seen: set[tuple[str, str, int | None, int | None, str]] = set()
-        merged_findings: list[Finding] = []
-        for r in raw_verdicts:
-            for raw_f in r.get("findings", []):
-                f = _parse_finding(raw_f)
-                if f is None:
-                    continue
-                key = _finding_key(
-                    file=f.file,
-                    category=f.category.value,
-                    line_start=f.line_start,
-                    line_end=f.line_end,
-                    evidence=f.evidence,
-                )
-                if key not in seen:
-                    seen.add(key)
-                    merged_findings.append(f)
+            # Find highest severity
+            all_severities = [Severity(r.get("severity", "NONE")) for r in raw_verdicts]
+            best_severity = max(all_severities, key=lambda s: SEVERITY_ORDER.get(s, 0))
 
-        # Use summary from most severe chunk
-        summary_chunk = max(
-            raw_verdicts,
-            key=lambda r: SEVERITY_ORDER.get(Severity(r.get("severity", "NONE")), 0),
-        )
-        summary = summary_chunk.get("summary", "")
+            # Weighted confidence
+            total_findings = sum(len(r.get("findings", [])) for r in raw_verdicts)
+            if total_findings == 0:
+                confidence = sum(r.get("confidence", 0.5) for r in raw_verdicts) / len(raw_verdicts)
+            else:
+                weighted = sum(r.get("confidence", 0.5) * len(r.get("findings", [])) for r in raw_verdicts)
+                confidence = weighted / total_findings
 
-        tokens_used = sum(r.get("_tokens_used", 0) for r in raw_verdicts)
+            # Deduplicate findings by (file, category)
+            seen: set[tuple[str, str, int | None, int | None, str]] = set()
+            merged_findings = []
+            for r in raw_verdicts:
+                for raw_f in r.get("findings", []):
+                    f = _parse_finding(raw_f)
+                    if f is None:
+                        continue
+                    key = _finding_key(
+                        file=f.file,
+                        category=f.category.value,
+                        line_start=f.line_start,
+                        line_end=f.line_end,
+                        evidence=f.evidence,
+                    )
+                    if key not in seen:
+                        seen.add(key)
+                        merged_findings.append(f)
+
+            # Use summary from most severe chunk
+            summary_chunk = max(
+                raw_verdicts,
+                key=lambda r: SEVERITY_ORDER.get(Severity(r.get("severity", "NONE")), 0),
+            )
+            summary = summary_chunk.get("summary", "")
+
+            tokens_used = sum(r.get("_tokens_used", 0) for r in raw_verdicts)
 
         # Inject rule-based findings (if not already covered by LLM findings)
         if rule_matches:

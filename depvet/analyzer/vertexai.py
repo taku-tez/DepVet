@@ -2,44 +2,18 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-import re
-from pathlib import Path
 from typing import Optional
 
 from depvet.analyzer.base import BaseAnalyzer
 from depvet.analyzer.import_diff import analyze_imports, import_signals_to_context
 from depvet.analyzer.decode_scan import decode_and_scan
 from depvet.analyzer.ast_scan import ast_scan_diff
+from depvet.analyzer.prompt_util import extract_json, load_prompt, safe_format
 from depvet.differ.chunker import DiffChunk
 
 logger = logging.getLogger(__name__)
-
-PROMPTS_DIR = Path(__file__).parent / "prompts"
-
-
-def _load_prompt(name: str) -> str:
-    return (PROMPTS_DIR / name).read_text(encoding="utf-8")
-
-
-def _safe_format(template: str, **kwargs: object) -> str:
-    """Format prompt template replacing only known placeholders (safe for JSON examples)."""
-    import re
-
-    pattern = re.compile(r"\{(" + "|".join(re.escape(k) for k in kwargs) + r")\}")
-    return pattern.sub(lambda m: str(kwargs[m.group(1)]), template)
-
-
-def _extract_json(text: str) -> dict:
-    text = text.strip()
-    text = re.sub(r"```(?:json)?\s*", "", text)
-    text = text.replace("```", "").strip()
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match:
-        return json.loads(match.group())
-    return json.loads(text)
 
 
 # ─── Claude on Vertex AI ─────────────────────────────────────────────────────
@@ -89,9 +63,9 @@ class VertexClaudeAnalyzer(BaseAnalyzer):
         self.triage_model = triage_model
         self.max_tokens = max_tokens
         self.timeout = timeout
-        self._triage_template = _load_prompt("triage.txt")
-        self._deep_template = _load_prompt("deep_analysis.txt")
-        self._deep_npm_template = _load_prompt("deep_analysis_npm.txt")
+        self._triage_template = load_prompt("triage.txt")
+        self._deep_template = load_prompt("deep_analysis.txt")
+        self._deep_npm_template = load_prompt("deep_analysis_npm.txt")
 
     def get_model_name(self) -> str:
         return f"vertex-claude/{self.model}"
@@ -103,7 +77,7 @@ class VertexClaudeAnalyzer(BaseAnalyzer):
         old_version: str,
         new_version: str,
     ) -> tuple[bool, str]:
-        prompt = _safe_format(
+        prompt = safe_format(
             self._triage_template,
             package_name=package_name,
             old_version=old_version,
@@ -117,7 +91,7 @@ class VertexClaudeAnalyzer(BaseAnalyzer):
                 messages=[{"role": "user", "content": prompt}],
             )
             text = getattr(response.content[0], "text", "{}") if response.content else "{}"
-            data = _extract_json(text)
+            data = extract_json(text)
             return bool(data.get("should_analyze", True)), data.get("reason", "")
         except Exception as e:  # LLM SDK may raise various errors; fail-safe to analyze
             logger.warning(f"Vertex Claude triage failed, defaulting to analyze: {e}")
@@ -156,7 +130,7 @@ class VertexClaudeAnalyzer(BaseAnalyzer):
                 pre_context_parts.append("\n".join(lines))
         pre_analysis_context = ("\n\n".join(pre_context_parts) + "\n") if pre_context_parts else ""
 
-        prompt = _safe_format(
+        prompt = safe_format(
             template,
             chunk_index=chunk_index + 1,
             total_chunks=total_chunks,
@@ -174,7 +148,7 @@ class VertexClaudeAnalyzer(BaseAnalyzer):
                 messages=[{"role": "user", "content": prompt}],
             )
             text = getattr(response.content[0], "text", "{}") if response.content else "{}"
-            return _extract_json(text)
+            return extract_json(text)
         except Exception as e:  # LLM SDK may raise various errors; fail-safe to analyze
             logger.error(f"Vertex Claude deep analysis failed: {e}")
             return {"verdict": "UNKNOWN", "confidence": 0.0, "error": str(e)}
@@ -229,9 +203,9 @@ class VertexGeminiAnalyzer(BaseAnalyzer):
         self.triage_model = triage_model
         self.max_tokens = max_tokens
         self.timeout = timeout
-        self._triage_template = _load_prompt("triage.txt")
-        self._deep_template = _load_prompt("deep_analysis.txt")
-        self._deep_npm_template = _load_prompt("deep_analysis_npm.txt")
+        self._triage_template = load_prompt("triage.txt")
+        self._deep_template = load_prompt("deep_analysis.txt")
+        self._deep_npm_template = load_prompt("deep_analysis_npm.txt")
 
     def get_model_name(self) -> str:
         return f"vertex-gemini/{self.model}"
@@ -257,7 +231,7 @@ class VertexGeminiAnalyzer(BaseAnalyzer):
         old_version: str,
         new_version: str,
     ) -> tuple[bool, str]:
-        prompt = _safe_format(
+        prompt = safe_format(
             self._triage_template,
             package_name=package_name,
             old_version=old_version,
@@ -266,7 +240,7 @@ class VertexGeminiAnalyzer(BaseAnalyzer):
         )
         try:
             text = await self._call(self.triage_model, prompt, 256)
-            data = _extract_json(text)
+            data = extract_json(text)
             return bool(data.get("should_analyze", True)), data.get("reason", "")
         except Exception as e:  # LLM SDK may raise various errors; fail-safe to analyze
             logger.warning(f"Vertex Gemini triage failed: {e}")
@@ -305,7 +279,7 @@ class VertexGeminiAnalyzer(BaseAnalyzer):
                 pre_context_parts.append("\n".join(lines))
         pre_analysis_context = ("\n\n".join(pre_context_parts) + "\n") if pre_context_parts else ""
 
-        prompt = _safe_format(
+        prompt = safe_format(
             template,
             chunk_index=chunk_index + 1,
             total_chunks=total_chunks,
@@ -318,7 +292,7 @@ class VertexGeminiAnalyzer(BaseAnalyzer):
         )
         try:
             text = await self._call(self.model, prompt, self.max_tokens)
-            return _extract_json(text)
+            return extract_json(text)
         except Exception as e:  # LLM SDK may raise various errors; fail-safe to analyze
             logger.error(f"Vertex Gemini deep analysis failed: {e}")
             return {"verdict": "UNKNOWN", "confidence": 0.0, "error": str(e)}

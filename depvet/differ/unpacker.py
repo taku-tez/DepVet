@@ -115,11 +115,22 @@ def _unpack_tarball(archive_path: Path, dest_dir: Path) -> Path:
             if Path(member.name).is_absolute():
                 continue
             members.append(member)
-        # Zip bomb guard for tarballs
+        # Zip bomb guard for tarballs — hard fail + cumulative limits (same as zip)
+        if len(members) > _MAX_FILE_COUNT:
+            logger.warning(f"Tarball has too many files ({len(members)} > {_MAX_FILE_COUNT}), truncating")
+            members = members[:_MAX_FILE_COUNT]
         total_size = sum(m.size for m in members)
         if total_size > _MAX_UNCOMPRESSED_BYTES:
-            logger.warning("Tarball too large (>500 MB uncompressed), truncating")
-            members = members[:_MAX_FILE_COUNT]
+            logger.warning(f"Tarball too large ({total_size} bytes > {_MAX_UNCOMPRESSED_BYTES}), truncating")
+            # Truncate by cumulative size
+            kept: list[tarfile.TarInfo] = []
+            running = 0
+            for m in members:
+                running += m.size
+                if running > _MAX_UNCOMPRESSED_BYTES:
+                    break
+                kept.append(m)
+            members = kept
         if "filter" in signature(tf.extractall).parameters:
             tf.extractall(out, members=members, filter="data")
         else:

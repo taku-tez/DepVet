@@ -219,6 +219,13 @@ async def _scan(config, package, old_version, new_version, ecosystem, json_outpu
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
             logger.debug(f"Version signal fetch failed: {e}")
 
+        # Extract new dependencies for zero-code-change detection
+        from depvet.analyzer.dep_extractor import extract_new_dependencies
+
+        new_deps = []
+        for chunk in chunks:
+            new_deps.extend(extract_new_dependencies(chunk.content, chunk.files[0].path if chunk.files else ""))
+
         deep = DeepAnalyzer(analyzer)
         verdict = await deep.analyze(
             chunks=chunks,
@@ -229,6 +236,7 @@ async def _scan(config, package, old_version, new_version, ecosystem, json_outpu
             diff_stats=stats,
             rule_matches=rule_matches,
             version_context=version_ctx,
+            new_deps=new_deps or None,
         )
 
         release = Release(
@@ -695,6 +703,15 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                             _eco,
                         )
 
+                        # Extract new deps for zero-code-change detection
+                        from depvet.analyzer.dep_extractor import extract_new_dependencies
+
+                        new_deps = []
+                        for chunk in chunks:
+                            new_deps.extend(
+                                extract_new_dependencies(chunk.content, chunk.files[0].path if chunk.files else "")
+                            )
+
                         deep = DeepAnalyzer(analyzer)
                         verdict = await deep.analyze(
                             chunks=chunks,
@@ -705,6 +722,7 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                             diff_stats=stats,
                             rule_matches=rule_matches,
                             version_context=version_ctx,
+                            new_deps=new_deps or None,
                         )
 
                         event = AlertEvent(release=release, verdict=verdict)

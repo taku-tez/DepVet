@@ -40,10 +40,10 @@ async def download_pypi_package(
             data = await resp.json()
 
         urls = data.get("urls", [])
-        # Prefer wheel, fall back to sdist
-        wheel = next((u for u in urls if u["packagetype"] == "bdist_wheel"), None)
+        # Prefer sdist for source diff (better for malicious code detection), fall back to wheel
         sdist = next((u for u in urls if u["packagetype"] == "sdist"), None)
-        chosen = wheel or sdist
+        wheel = next((u for u in urls if u["packagetype"] == "bdist_wheel"), None)
+        chosen = sdist or wheel
         if not chosen:
             logger.warning(f"No downloadable release found for {name}=={version}")
             return None
