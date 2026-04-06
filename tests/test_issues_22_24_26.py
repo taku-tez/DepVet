@@ -72,14 +72,15 @@ class TestNoAnalyzeAlertDispatch:
     def test_no_analyze_dispatches_to_router(self):
         """When no_analyze=True, router.dispatch() must still be called."""
         src = pathlib.Path("depvet/cli.py").read_text()
-        # _process_one is defined after first "if releases:", find the correct boundary
         p1_start = src.find("async def _process_one")
-        # Find "if releases:" that comes AFTER _process_one
         p1_end = src.find("if releases:", p1_start)
         process_one = src[p1_start:p1_end]
-        # Check that router.dispatch is called before the no_analyze return
-        no_analyze_block = process_one[process_one.find("no_analyze") : process_one.find("return") + 10]
-        assert "router.dispatch" in no_analyze_block, (
+        # The no_analyze/no-previous-version branch must call router.dispatch
+        # somewhere between "no_analyze" and the next "try:" (deep analyze block)
+        no_analyze_idx = process_one.find("no_analyze")
+        try_idx = process_one.find("try:", no_analyze_idx)
+        no_analyze_section = process_one[no_analyze_idx:try_idx] if try_idx > 0 else process_one[no_analyze_idx:]
+        assert "router.dispatch" in no_analyze_section, (
             "_process_one must call router.dispatch() even when no_analyze=True"
         )
 

@@ -635,6 +635,15 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
 
         # Process results
         async def _process_one(release, _eco):
+            # Dedup: skip if already alerted (e.g. restart mid-batch)
+            if state.is_alerted(_eco, release.name, release.version):
+                logger.debug(
+                    "Skipping already-alerted release %s@%s",
+                    release.name,
+                    release.version,
+                )
+                return
+
             click.echo(f"    📦 {release.name} {release.version}")
             if no_analyze or not release.previous_version:
                 from depvet.models.alert import AlertEvent
@@ -660,6 +669,7 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                 )
                 notify_event = AlertEvent(release=release, verdict=notify_verdict)
                 await router.dispatch(notify_event)
+                state.mark_alerted(_eco, release.name, release.version)
                 return
             try:
                 async with _sem:
@@ -727,6 +737,7 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
 
                         event = AlertEvent(release=release, verdict=verdict)
                         await router.dispatch(event)
+                        state.mark_alerted(_eco, release.name, release.version)
                         metrics.record_analysis(verdict.tokens_used, verdict.analysis_duration_ms)
                 metrics.record_release(_eco)
             except Exception as e:  # Outermost catch-all for entire analysis pipeline

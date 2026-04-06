@@ -350,3 +350,67 @@ class TestReleaseOnlyDispatch:
         assert len(dispatched) == 1
         assert dispatched[0].verdict.verdict == VerdictType.UNKNOWN
         assert dispatched[0].verdict.severity == Severity.MEDIUM
+
+
+# ─── Alert deduplication ────────────────────────────────────────────────────
+
+
+class TestAlertDeduplication:
+    """Tests for PollingState alert deduplication."""
+
+    def test_is_alerted_returns_false_initially(self, tmp_path):
+        from depvet.registry.state import PollingState
+
+        s = PollingState(path=str(tmp_path / "state.yaml"))
+        assert s.is_alerted("pypi", "requests", "2.32.0") is False
+
+    def test_mark_and_check(self, tmp_path):
+        from depvet.registry.state import PollingState
+
+        s = PollingState(path=str(tmp_path / "state.yaml"))
+        s.mark_alerted("pypi", "requests", "2.32.0")
+        assert s.is_alerted("pypi", "requests", "2.32.0") is True
+        assert s.is_alerted("pypi", "requests", "2.31.0") is False
+
+    def test_persists_across_instances(self, tmp_path):
+        from depvet.registry.state import PollingState
+
+        path = str(tmp_path / "state.yaml")
+        s1 = PollingState(path=path)
+        s1.mark_alerted("npm", "lodash", "4.17.21")
+
+        s2 = PollingState(path=path)
+        assert s2.is_alerted("npm", "lodash", "4.17.21") is True
+
+    def test_fifo_eviction(self, tmp_path, monkeypatch):
+        import depvet.registry.state as state_mod
+        from depvet.registry.state import PollingState
+
+        monkeypatch.setattr(state_mod, "_MAX_ALERTED_PER_ECOSYSTEM", 10)
+        s = PollingState(path=str(tmp_path / "state.yaml"))
+        for i in range(15):
+            s.mark_alerted("pypi", f"pkg-{i}", "1.0.0")
+
+        # Oldest 5 should be evicted
+        assert s.is_alerted("pypi", "pkg-0", "1.0.0") is False
+        assert s.is_alerted("pypi", "pkg-4", "1.0.0") is False
+        # Newest 10 should remain
+        assert s.is_alerted("pypi", "pkg-5", "1.0.0") is True
+        assert s.is_alerted("pypi", "pkg-14", "1.0.0") is True
+
+    def test_does_not_duplicate(self, tmp_path):
+        from depvet.registry.state import PollingState
+
+        s = PollingState(path=str(tmp_path / "state.yaml"))
+        s.mark_alerted("pypi", "requests", "2.32.0")
+        s.mark_alerted("pypi", "requests", "2.32.0")  # duplicate
+        alerted = s.get("pypi").get("_alerted", [])
+        count = sum(1 for p in alerted if p == ["requests", "2.32.0"])
+        assert count == 1
+
+    def test_cross_ecosystem_isolation(self, tmp_path):
+        from depvet.registry.state import PollingState
+
+        s = PollingState(path=str(tmp_path / "state.yaml"))
+        s.mark_alerted("pypi", "requests", "2.32.0")
+        assert s.is_alerted("npm", "requests", "2.32.0") is False
