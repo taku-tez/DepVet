@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
 import aiohttp
-from typing import Optional
 
 from depvet.http import retry_request
 from depvet.models.package import Release
@@ -23,6 +23,8 @@ DEFAULT_UA = "depvet/0.1.0 (github.com/taku-tez/DepVet)"
 
 _TIMEOUT = aiohttp.ClientTimeout(total=10)
 _TOP_N_TIMEOUT = aiohttp.ClientTimeout(total=15)
+# Max concurrent version fetches per poll cycle
+_MAX_CONCURRENT_CHECKS = 15  # crates.io rate-limits; keep conservative
 
 
 class CargoMonitor(BaseRegistryMonitor):
@@ -30,6 +32,7 @@ class CargoMonitor(BaseRegistryMonitor):
     Monitors crates.io for new Cargo package releases.
 
     Uses the crates.io REST API to check for new versions.
+    Crates are checked in parallel (up to _MAX_CONCURRENT_CHECKS).
     State format: {"crates": {"<name>": "<last_version>"}}
 
     Note: crates.io requires a User-Agent header.
@@ -61,25 +64,25 @@ class CargoMonitor(BaseRegistryMonitor):
         close_session = session is None
         if session is None:
             session = aiohttp.ClientSession(headers=self._headers())
-        try:
-            for crate in watchlist:
+
+        sem = asyncio.Semaphore(_MAX_CONCURRENT_CHECKS)
+
+        async def _check_one(crate: str) -> None:
+            async with sem:
                 try:
                     versions = await self._get_versions(crate, session)
                     if not versions:
-                        continue
+                        return
 
-                    # Versions are sorted newest first from crates.io
                     latest = versions[0]
                     prev_known = known_versions.get(crate)
 
                     if prev_known is None:
                         new_known[crate] = latest["num"]
-                        continue
+                        return
 
                     if latest["num"] != prev_known:
-                        # Find previous version (second in list, or prev_known)
                         prev_version = versions[1]["num"] if len(versions) > 1 else prev_known
-
                         releases.append(
                             Release(
                                 name=crate,
@@ -94,6 +97,9 @@ class CargoMonitor(BaseRegistryMonitor):
 
                 except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                     logger.warning(f"Failed to check Cargo crate {crate}: {e}")
+
+        try:
+            await asyncio.gather(*[_check_one(c) for c in watchlist])
         finally:
             if close_session:
                 await session.close()
@@ -150,4 +156,4 @@ class CargoMonitor(BaseRegistryMonitor):
             data = await resp.json()
 
         versions = [v for v in data.get("versions", []) if not v.get("yanked", False)]
-        return versions  # Already sorted newest first by crates.io
+        return versions

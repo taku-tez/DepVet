@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
-
-import aiohttp
 from typing import Optional
 
+import aiohttp
+
+from depvet.http import retry_request
 from depvet.models.package import Release
 from depvet.registry.base import BaseRegistryMonitor
 
@@ -17,8 +18,11 @@ logger = logging.getLogger(__name__)
 # Maven Central REST API
 SEARCH_API = "https://search.maven.org/solrsearch/select"
 ARTIFACT_API = "https://repo1.maven.org/maven2"
-# Maven recent activity feed
 RECENT_API = "https://search.maven.org/solrsearch/select?q=*&rows=20&wt=json&sort=timestamp+desc"
+
+_TIMEOUT = aiohttp.ClientTimeout(total=15)
+# Max concurrent version fetches per poll cycle
+_MAX_CONCURRENT_CHECKS = 20
 
 
 class MavenMonitor(BaseRegistryMonitor):
@@ -26,6 +30,7 @@ class MavenMonitor(BaseRegistryMonitor):
     Monitors Maven Central for new artifact releases.
 
     Watchlist format: "groupId:artifactId" (e.g., "com.fasterxml.jackson.core:jackson-databind")
+    Artifacts are checked in parallel (up to _MAX_CONCURRENT_CHECKS).
     State format: {"artifacts": {"<groupId:artifactId>": "<last_version>"}}
     """
 
@@ -49,23 +54,26 @@ class MavenMonitor(BaseRegistryMonitor):
         close_session = session is None
         if session is None:
             session = aiohttp.ClientSession()
-        try:
-            for artifact in watchlist:
+
+        sem = asyncio.Semaphore(_MAX_CONCURRENT_CHECKS)
+
+        async def _check_one(artifact: str) -> None:
+            async with sem:
                 if ":" not in artifact:
                     logger.warning(f"Maven artifact should be 'groupId:artifactId': {artifact}")
-                    continue
+                    return
                 group_id, artifact_id = artifact.split(":", 1)
                 try:
                     versions = await self._get_versions(group_id, artifact_id, session)
                     if not versions:
-                        continue
+                        return
 
-                    latest = versions[0]  # newest first
+                    latest = versions[0]
                     prev_known = known_versions.get(artifact)
 
                     if prev_known is None:
                         new_known[artifact] = latest["version"]
-                        continue
+                        return
 
                     if latest["version"] != prev_known:
                         prev_version = versions[1]["version"] if len(versions) > 1 else prev_known
@@ -89,6 +97,9 @@ class MavenMonitor(BaseRegistryMonitor):
 
                 except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                     logger.warning(f"Failed to check Maven artifact {artifact}: {e}")
+
+        try:
+            await asyncio.gather(*[_check_one(a) for a in watchlist])
         finally:
             if close_session:
                 await session.close()
@@ -124,7 +135,8 @@ class MavenMonitor(BaseRegistryMonitor):
             "rows": "20",
             "wt": "json",
         }
-        async with session.get(SEARCH_API, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+        resp = await retry_request(session, "GET", SEARCH_API, params=params, timeout=_TIMEOUT)
+        async with resp:
             if resp.status != 200:
                 logger.warning(f"Maven search API returned {resp.status}")
                 return []

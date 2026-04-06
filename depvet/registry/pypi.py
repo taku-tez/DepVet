@@ -52,8 +52,10 @@ class PyPIMonitor(BaseRegistryMonitor):
         if not events:
             return [], {"serial": serial}
         new_serial = max(int(e[3]) for e in events)
-        releases = []
-        seen = set()
+
+        # Collect unique new releases
+        seen: set[tuple[str, str]] = set()
+        candidates: list[tuple[str, str, int]] = []  # (name, version, timestamp)
         for name, version, ts, event_serial, action in events:
             if action != "new release" or name not in watchlist:
                 continue
@@ -61,19 +63,29 @@ class PyPIMonitor(BaseRegistryMonitor):
             if key in seen:
                 continue
             seen.add(key)
-            prev = await self._get_previous_version(name, version, session=session)
+            candidates.append((name, version, ts))
+
+        if not candidates:
+            return [], {"serial": new_serial}
+
+        # Fetch previous versions in parallel (bounded)
+        sem = asyncio.Semaphore(20)
+
+        async def _resolve(name: str, version: str, ts: int) -> Release:
+            async with sem:
+                prev = await self._get_previous_version(name, version, session=session)
             published_at = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
-            releases.append(
-                Release(
-                    name=name,
-                    version=version,
-                    ecosystem="pypi",
-                    previous_version=prev,
-                    published_at=published_at,
-                    url=f"https://pypi.org/project/{name}/{version}/",
-                )
+            return Release(
+                name=name,
+                version=version,
+                ecosystem="pypi",
+                previous_version=prev,
+                published_at=published_at,
+                url=f"https://pypi.org/project/{name}/{version}/",
             )
-        return releases, {"serial": new_serial}
+
+        releases = await asyncio.gather(*[_resolve(n, v, t) for n, v, t in candidates])
+        return list(releases), {"serial": new_serial}
 
     async def load_top_n(self, n: int, session: Optional[aiohttp.ClientSession] = None):
         close_session = session is None

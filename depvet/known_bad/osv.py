@@ -101,48 +101,67 @@ class OSVChecker:
     async def batch_check(
         self,
         packages: list[tuple[str, str, str]],
+        chunk_size: int = 100,
     ) -> dict[tuple[str, str, str], list[KnownBadEntry]]:
         """
         Batch check multiple packages against OSV.dev.
-        packages: list of (name, version, ecosystem)
+
+        Large lists are split into chunks of *chunk_size* to avoid
+        payload limits and timeouts on the OSV batch endpoint.
         """
         results: dict[tuple[str, str, str], list[KnownBadEntry]] = {}
-        # OSV batch endpoint
-        queries = []
-        pkg_keys = []
+        all_queries: list[dict] = []
+        all_keys: list[tuple[str, str, str]] = []
         for name, version, ecosystem in packages:
             osv_eco = OSV_ECOSYSTEM_MAP.get(ecosystem)
             if not osv_eco:
                 continue
-            queries.append(
+            all_queries.append(
                 {
                     "version": version,
                     "package": {"name": name, "ecosystem": osv_eco},
                 }
             )
-            pkg_keys.append((name, version, ecosystem))
+            all_keys.append((name, version, ecosystem))
 
-        if not queries:
+        if not all_queries:
             return results
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                resp = await retry_request(
-                    session,
-                    "POST",
-                    f"{OSV_API}/querybatch",
-                    json={"queries": queries},
-                    timeout=_BATCH_TIMEOUT,
-                )
-                async with resp:
-                    if resp.status != 200:
-                        logger.warning(f"OSV batch API returned {resp.status}")
-                        return results
-                    data = await resp.json()
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-            logger.error(f"OSV batch API failed: {e}")
-            return results
+        # Process in chunks
+        async with aiohttp.ClientSession() as session:
+            for start in range(0, len(all_queries), chunk_size):
+                queries = all_queries[start : start + chunk_size]
+                pkg_keys = all_keys[start : start + chunk_size]
+                try:
+                    resp = await retry_request(
+                        session,
+                        "POST",
+                        f"{OSV_API}/querybatch",
+                        json={"queries": queries},
+                        timeout=_BATCH_TIMEOUT,
+                    )
+                    async with resp:
+                        if resp.status != 200:
+                            logger.warning(
+                                f"OSV batch API returned {resp.status} (chunk {start}–{start + len(queries)})"
+                            )
+                            continue
+                        data = await resp.json()
+                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                    logger.error(f"OSV batch API failed (chunk {start}–{start + len(queries)}): {e}")
+                    continue
 
+                self._process_batch_results(data, pkg_keys, results)
+
+        return results
+
+    def _process_batch_results(
+        self,
+        data: dict,
+        pkg_keys: list[tuple[str, str, str]],
+        results: dict[tuple[str, str, str], list[KnownBadEntry]],
+    ) -> None:
+        """Parse a single batch response and merge into results."""
         for i, result in enumerate(data.get("results", [])):
             key = pkg_keys[i]
             name, version, ecosystem = key
@@ -169,8 +188,6 @@ class OSVChecker:
                     )
                 )
             results[key] = entries
-
-        return results
 
     def _map_ecosystem(self, ecosystem: str) -> str | None:
         """Map DepVet ecosystem name to OSV ecosystem name."""

@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
 import aiohttp
-from typing import Optional
 
 from depvet.http import retry_request
 from depvet.models.package import Release
@@ -20,11 +20,9 @@ logger = logging.getLogger(__name__)
 GOPROXY_URL = "https://proxy.golang.org"
 SUMDB_URL = "https://sum.golang.org"
 
-# Note: Go doesn't have a simple "changelog" API like PyPI/npm.
-# We poll the module proxy for specific modules in the watchlist.
-# State: {"checked_at": ISO8601 per module}
-
 _TIMEOUT = aiohttp.ClientTimeout(total=10)
+# Max concurrent version-list fetches per poll cycle
+_MAX_CONCURRENT_CHECKS = 20
 
 
 class GoModulesMonitor(BaseRegistryMonitor):
@@ -33,6 +31,7 @@ class GoModulesMonitor(BaseRegistryMonitor):
 
     Since Go doesn't have a registry-level feed, we poll each module
     in the watchlist individually via proxy.golang.org/@v/list.
+    Modules are checked in parallel (up to _MAX_CONCURRENT_CHECKS).
 
     State format: {"modules": {"<module_path>": "<last_version>"}}
     """
@@ -57,33 +56,32 @@ class GoModulesMonitor(BaseRegistryMonitor):
         close_session = session is None
         if session is None:
             session = aiohttp.ClientSession()
-        try:
-            for module in watchlist:
+
+        sem = asyncio.Semaphore(_MAX_CONCURRENT_CHECKS)
+
+        async def _check_one(module: str) -> None:
+            async with sem:
                 try:
                     versions = await self._list_versions(module, session)
                     if not versions:
-                        continue
+                        return
 
                     latest = versions[-1]
                     prev = known_versions.get(module)
 
                     if prev is None:
-                        # First time seeing this module; record latest but don't alert
                         new_known[module] = latest
-                        continue
+                        return
 
                     if latest != prev:
-                        # New version appeared
-                        prev_ver = prev
                         info = await self._get_version_info(module, latest, session)
                         published_at = info.get("Time", datetime.now(timezone.utc).isoformat())
-
                         releases.append(
                             Release(
                                 name=module,
                                 version=latest,
                                 ecosystem="go",
-                                previous_version=prev_ver,
+                                previous_version=prev,
                                 published_at=published_at,
                                 url=f"https://pkg.go.dev/{module}@{latest}",
                             )
@@ -92,6 +90,9 @@ class GoModulesMonitor(BaseRegistryMonitor):
 
                 except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                     logger.warning(f"Failed to check Go module {module}: {e}")
+
+        try:
+            await asyncio.gather(*[_check_one(m) for m in watchlist])
         finally:
             if close_session:
                 await session.close()
@@ -132,7 +133,6 @@ class GoModulesMonitor(BaseRegistryMonitor):
             session = aiohttp.ClientSession()
         try:
             results: list[str] = []
-            # pkg.go.dev search API returns popular modules sorted by relevance
             for query in ("", "github.com", "google.golang.org", "go.uber.org"):
                 if len(results) >= n:
                     break
@@ -143,8 +143,6 @@ class GoModulesMonitor(BaseRegistryMonitor):
                     if resp.status != 200:
                         continue
                     text = await resp.text()
-                # Parse module paths from search result HTML
-                # Each result has data-href="/mod/github.com/..." or similar
                 import re
 
                 for m in re.finditer(r'data-href="/(?:mod/)?([^"@?]+)"', text):
@@ -170,7 +168,7 @@ class GoModulesMonitor(BaseRegistryMonitor):
         resp = await retry_request(session, "GET", url, timeout=_TIMEOUT)
         async with resp:
             if resp.status == 410:
-                return []  # Module not found or retracted
+                return []
             if resp.status != 200:
                 logger.debug(f"Go proxy returned {resp.status} for {module}")
                 return []
