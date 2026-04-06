@@ -58,24 +58,33 @@ class WatchlistManager:
         return result
 
     def import_from_sbom(self, path: str, fmt: str | None = None) -> int:
+        """Import dependencies from an SBOM file.
+
+        Returns the number of *newly added* packages (excludes duplicates).
+        """
         from depvet.watchlist.sbom import SBOMParser
 
         parser = SBOMParser()
         entries = parser.parse(path, fmt=fmt)
+        before = len(self._explicit.entries())
         for entry in entries:
             self._explicit.add(entry.name, entry.ecosystem)
         self._save()
-        return len(entries)
+        return len(self._explicit.entries()) - before
 
     def import_from_lockfile(self, path: str) -> int:
-        """Import dependencies from a lockfile (package-lock.json, yarn.lock, etc.)."""
+        """Import dependencies from a lockfile (package-lock.json, yarn.lock, etc.).
+
+        Returns the number of *newly added* packages (excludes duplicates).
+        """
         from depvet.watchlist.lockfile import parse_lockfile
 
         entries = parse_lockfile(path)
+        before = len(self._explicit.entries())
         for entry in entries:
             self._explicit.add(entry.name, entry.ecosystem)
         self._save()
-        return len(entries)
+        return len(self._explicit.entries()) - before
 
     def as_set(self, ecosystem: str) -> set[str]:
         return self._explicit.as_set(ecosystem)

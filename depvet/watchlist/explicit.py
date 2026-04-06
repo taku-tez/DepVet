@@ -38,15 +38,17 @@ class ExplicitSource:
         return {e.name for e in self._entries if e.ecosystem == ecosystem}
 
     def load_from_file(self, path: str, ecosystem: str = "pypi") -> int:
-        """Load package names from a plain text file (one per line)."""
-        count = 0
+        """Load package names from a plain text file (one per line).
+
+        Returns the number of *newly added* packages (excludes duplicates).
+        """
+        before = len(self._entries)
         with open(path) as f:
             for line in f:
                 name = line.strip()
                 if name and not name.startswith("#"):
                     self.add(name, ecosystem)
-                    count += 1
-        return count
+        return len(self._entries) - before
 
     def save_to_file(self, path: str, ecosystem: str = "pypi") -> None:
         """Save packages to a plain text file."""

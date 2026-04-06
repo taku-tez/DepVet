@@ -584,7 +584,7 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
 
     # Alert router
     router = AlertRouter(min_severity=config.alert.min_severity, dlq=dlq)
-    router.register(StdoutAlerter(json_mode=json_output))
+    router.register(StdoutAlerter(json_mode=json_output, min_severity=config.alert.min_severity))
     if slack:
         slack_webhook = os.environ.get(config.alert.slack_webhook_env)
         router.register(SlackAlerter(webhook_url=slack_webhook))
@@ -645,11 +645,13 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                 return
 
             click.echo(f"    📦 {release.name} {release.version}")
+            metrics.record_release(_eco)
             if no_analyze or not release.previous_version:
                 from depvet.models.alert import AlertEvent
                 from depvet.models.verdict import Verdict, VerdictType, Severity, DiffStats
                 from datetime import datetime, timezone
 
+                metrics.releases_skipped += 1
                 notify_verdict = Verdict(
                     verdict=VerdictType.UNKNOWN,
                     severity=Severity.MEDIUM,
@@ -688,6 +690,7 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                             release.name, release.version, _eco, tmp / "new", session=_shared_session
                         )
                         if not old_arch or not new_arch:
+                            metrics.releases_skipped += 1
                             return
 
                         old_dir = unpack(old_arch, tmp / "uo")
@@ -695,6 +698,7 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                         chunks, stats = generate_diff(old_dir, new_dir)
 
                         if not chunks:
+                            metrics.releases_skipped += 1
                             return
 
                         triage = TriageAnalyzer(analyzer)
@@ -702,6 +706,7 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                             chunks, release.name, release.previous_version, release.version
                         )
                         if not should:
+                            metrics.releases_skipped += 1
                             return
 
                         from depvet.analyzer.version_signal import get_transition_context
@@ -739,7 +744,6 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
                         await router.dispatch(event)
                         state.mark_alerted(_eco, release.name, release.version)
                         metrics.record_analysis(verdict.tokens_used, verdict.analysis_duration_ms)
-                metrics.record_release(_eco)
             except Exception as e:  # Outermost catch-all for entire analysis pipeline
                 logger.error(f"Analysis failed for {release.name}: {e}")
 
@@ -786,6 +790,7 @@ async def _monitor(config, top, sbom, interval, once, no_npm, no_pypi, no_analyz
 
     # --- Shutdown summary ---
     metrics.alerts_sent = router.dispatched_count
+    metrics.alerts_failed = router.failed_count
     metrics.log_summary()
     write_health(metrics=metrics, status="shutdown")
 

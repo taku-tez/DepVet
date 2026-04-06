@@ -18,6 +18,19 @@ _STRUCTURED_FIELDS = (
     "releases_count",
     "duration_ms",
     "signal",
+    # MonitorMetrics.log_summary() keys
+    "uptime_seconds",
+    "cycles_completed",
+    "releases_processed",
+    "releases_skipped",
+    "releases_by_ecosystem",
+    "alerts_sent",
+    "alerts_failed",
+    "analyses_completed",
+    "total_tokens_used",
+    "total_analysis_duration_ms",
+    "avg_analysis_ms",
+    "avg_tokens_per_analysis",
 )
 
 

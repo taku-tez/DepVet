@@ -114,3 +114,56 @@ class TestExtractJson:
     def test_invalid_raises(self):
         with pytest.raises(json.JSONDecodeError):
             extract_json("not json")
+
+    def test_json_surrounded_by_prose(self):
+        text = 'Here is my analysis:\n{"verdict": "MALICIOUS", "confidence": 0.95}\nThat is my conclusion.'
+        result = extract_json(text)
+        assert result["verdict"] == "MALICIOUS"
+        assert result["confidence"] == 0.95
+
+    def test_nested_json(self):
+        text = '{"outer": {"inner": [1, 2, 3]}}'
+        result = extract_json(text)
+        assert result["outer"]["inner"] == [1, 2, 3]
+
+    def test_markdown_block_with_language_tag(self):
+        text = "```json\n{\"a\": 1}\n```"
+        assert extract_json(text) == {"a": 1}
+
+    def test_markdown_block_without_language_tag(self):
+        text = "```\n{\"b\": 2}\n```"
+        assert extract_json(text) == {"b": 2}
+
+    def test_whitespace_only(self):
+        with pytest.raises((json.JSONDecodeError, ValueError)):
+            extract_json("   \n  ")
+
+    def test_empty_string(self):
+        with pytest.raises((json.JSONDecodeError, ValueError)):
+            extract_json("")
+
+    def test_json_with_trailing_text(self):
+        """JSON followed by non-JSON text should be extracted."""
+        text = '{"verdict": "BENIGN"}\nThat is my analysis.'
+        result = extract_json(text)
+        assert result["verdict"] == "BENIGN"
+
+
+class TestSafeFormatEdgeCases:
+    def test_regex_special_chars_in_values(self):
+        """Values with regex special chars should be treated as literals."""
+        result = safe_format("Pattern: {val}", val="a+b*c?d")
+        assert result == "Pattern: a+b*c?d"
+
+    def test_overlapping_key_names(self):
+        result = safe_format("{a} {ab}", a="X", ab="Y")
+        assert result == "X Y"
+
+    def test_repeated_placeholder(self):
+        result = safe_format("{x} and {x}", x="hello")
+        assert result == "hello and hello"
+
+    def test_multiline_template(self):
+        template = "Line1: {a}\nLine2: {b}\nLine3: {c}"
+        result = safe_format(template, a="1", b="2", c="3")
+        assert result == "Line1: 1\nLine2: 2\nLine3: 3"

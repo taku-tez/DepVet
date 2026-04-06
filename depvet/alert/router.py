@@ -45,6 +45,7 @@ class AlertRouter:
         self._min_severity = Severity(min_severity)
         self._dlq = dlq
         self.dispatched_count: int = 0
+        self.failed_count: int = 0
 
     def register(self, alerter: Alerter) -> None:
         self._alerters.append(alerter)
@@ -76,3 +77,5 @@ class AlertRouter:
                 any_success = True
         if any_success:
             self.dispatched_count += 1
+        else:
+            self.failed_count += 1

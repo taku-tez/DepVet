@@ -216,7 +216,7 @@ MALICIOUS_PATTERNS: list[dict] = [
     {
         "id": "SOCKET_CONNECT_IP",
         "pattern": re.compile(
-            r"""socket.*?connect\s*\(\s*\(\s*["']\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}["']""",
+            r"""socket\b.*?connect\s*\(\s*\(\s*["']\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}["']""",
             re.IGNORECASE | re.DOTALL,
         ),
         "category": FindingCategory.NETWORK,

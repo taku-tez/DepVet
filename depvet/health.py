@@ -75,13 +75,14 @@ def check_health(path: str = DEFAULT_HEALTH_PATH) -> None:
 
     Exits 0 if the monitor is healthy, 1 otherwise.
     Healthy = status file exists, status == "ok", and file is not stale.
-    If no health file exists (e.g. not running monitor), just verify
+    If no health file exists on disk (e.g. not running monitor), just verify
     that the package is importable (exit 0).
+    If the health file exists but is corrupt/unreadable, exit 1.
     """
-    data = read_health(path)
+    p = Path(path)
 
-    if data is None:
-        # No health file — fall back to import check
+    if not p.exists():
+        # No health file on disk — fall back to import check
         try:
             import depvet  # noqa: F401
 
@@ -89,12 +90,23 @@ def check_health(path: str = DEFAULT_HEALTH_PATH) -> None:
         except ImportError:
             sys.exit(1)
 
+    data = read_health(path)
+    if data is None:
+        # File exists but is corrupt / unreadable
+        print("UNHEALTHY: health file corrupt or unreadable", file=sys.stderr)
+        sys.exit(1)
+
     if data.get("status") != "ok":
         print(f"UNHEALTHY: status={data.get('status')}", file=sys.stderr)
         sys.exit(1)
 
-    updated = data.get("updated_epoch", 0)
-    age = time.time() - float(updated)
+    try:
+        updated = float(data.get("updated_epoch", 0))
+    except (ValueError, TypeError):
+        print("UNHEALTHY: invalid updated_epoch in health file", file=sys.stderr)
+        sys.exit(1)
+
+    age = time.time() - updated
     if age > STALE_THRESHOLD_SECONDS:
         print(f"UNHEALTHY: health file stale ({age:.0f}s old)", file=sys.stderr)
         sys.exit(1)

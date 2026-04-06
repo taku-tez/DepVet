@@ -113,6 +113,17 @@ class TestStdoutAlerter:
         out = capsys.readouterr().out
         assert out.strip() != ""
 
+    @pytest.mark.asyncio
+    async def test_low_severity_shown_when_min_is_low(self, capsys):
+        """[Finding 1] StdoutAlerter must respect min_severity=LOW, not hardcode MEDIUM."""
+        alerter = StdoutAlerter(json_mode=True, min_severity="LOW")
+        event = _make_event(VerdictType.SUSPICIOUS, Severity.LOW)
+        await alerter.send(event)
+        out = capsys.readouterr().out.strip()
+        assert out != "", "LOW severity event should be output when min_severity=LOW"
+        parsed = json.loads(out)
+        assert parsed["severity"] == "LOW"
+
 
 # ─── SlackAlerter ────────────────────────────────────────────────────────────
 
@@ -313,6 +324,24 @@ class TestAlertRouter:
         event = _make_event(VerdictType.BENIGN, Severity.NONE)
         assert not router._should_alert(event)
 
+    @pytest.mark.asyncio
+    async def test_failed_count_tracked(self):
+        """[Finding 4] Router should track failed_count when all alerters fail."""
+
+        class FailAlerter:
+            name = "fail"
+
+            async def send(self, event):
+                raise RuntimeError("boom")
+
+        router = AlertRouter(min_severity="LOW")
+        router.register(FailAlerter())
+
+        event = _make_event(VerdictType.MALICIOUS, Severity.HIGH)
+        await router.dispatch(event)
+        assert router.dispatched_count == 0
+        assert router.failed_count == 1
+
 
 # ─── _build_release_url (cli helper) ─────────────────────────────────────────
 
@@ -349,3 +378,172 @@ class TestBuildReleaseUrl:
 
         url = _build_release_url("pkg", "1.0", "unknown")
         assert url  # should not be empty
+
+
+# ─── format_alert_text ──────────────────────────────────────────────────────
+
+
+class TestFormatAlertText:
+    def test_contains_package_info(self):
+        from depvet.alert.stdout import format_alert_text
+        from depvet.models.verdict import Finding, FindingCategory
+
+        verdict = _make_verdict()
+        verdict.findings = [
+            Finding(
+                category=FindingCategory.EXFILTRATION,
+                description="Env vars sent to external server",
+                file="setup.py",
+                line_start=10,
+                line_end=15,
+                evidence="os.environ",
+                cwe="CWE-200",
+                severity=Severity.CRITICAL,
+            )
+        ]
+        event = AlertEvent(release=_make_release(), verdict=verdict)
+        text = format_alert_text(event)
+        assert "evil-pkg" in text
+        assert "MALICIOUS" in text
+        assert "EXFILTRATION" in text
+        assert "CWE-200" in text
+        assert "setup.py" in text
+        assert "L10-L15" in text
+
+    def test_no_findings(self):
+        from depvet.alert.stdout import format_alert_text
+
+        event = _make_event(VerdictType.SUSPICIOUS, Severity.MEDIUM)
+        text = format_alert_text(event)
+        assert "SUSPICIOUS" in text
+        assert "Findings:" not in text
+
+    def test_contains_url(self):
+        from depvet.alert.stdout import format_alert_text
+
+        event = _make_event()
+        text = format_alert_text(event)
+        assert "pypi.org" in text
+
+
+# ─── StdoutAlerter JSON mode detail ────────────────────────────────────────
+
+
+class TestStdoutAlerterJsonDetail:
+    @pytest.mark.asyncio
+    async def test_json_mode_has_all_fields(self, capsys):
+        alerter = StdoutAlerter(json_mode=True, min_severity="NONE")
+        event = _make_event(VerdictType.MALICIOUS, Severity.CRITICAL)
+        await alerter.send(event)
+        out = capsys.readouterr().out.strip()
+        parsed = json.loads(out)
+        assert parsed["package"] == "evil-pkg"
+        assert parsed["version"] == "1.0.1"
+        assert parsed["ecosystem"] == "pypi"
+        assert parsed["verdict"] == "MALICIOUS"
+        assert parsed["severity"] == "CRITICAL"
+        assert "confidence" in parsed
+        assert "summary" in parsed
+        assert "url" in parsed
+
+    @pytest.mark.asyncio
+    async def test_json_mode_previous_version(self, capsys):
+        alerter = StdoutAlerter(json_mode=True, min_severity="NONE")
+        event = _make_event(VerdictType.SUSPICIOUS, Severity.MEDIUM)
+        await alerter.send(event)
+        out = capsys.readouterr().out.strip()
+        parsed = json.loads(out)
+        assert parsed["previous_version"] == "1.0.0"
+
+
+# ─── WebhookAlerter error handling ──────────────────────────────────────────
+
+
+class TestWebhookAlerterError:
+    @pytest.mark.asyncio
+    async def test_webhook_400_raises(self):
+        """Webhook returning 400+ should raise AlertDeliveryError."""
+        from depvet.alert.router import AlertDeliveryError
+
+        with patch("aiohttp.ClientSession") as mock_cls:
+            mock_resp = AsyncMock()
+            mock_resp.status = 500
+            mock_resp.headers = {}
+            mock_resp.release = MagicMock()
+            mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+            mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+            mock_sess = AsyncMock()
+            mock_sess.request = AsyncMock(return_value=mock_resp)
+            mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
+            mock_sess.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_sess
+
+            alerter = WebhookAlerter(url="https://example.com/hook")
+            event = _make_event()
+            with pytest.raises(AlertDeliveryError, match="500"):
+                await alerter.send(event)
+
+
+class TestSlackAlerterError:
+    @pytest.mark.asyncio
+    async def test_slack_non_200_raises(self):
+        from depvet.alert.router import AlertDeliveryError
+
+        with patch("aiohttp.ClientSession") as mock_cls:
+            mock_resp = AsyncMock()
+            mock_resp.status = 403
+            mock_resp.headers = {}
+            mock_resp.release = MagicMock()
+            mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+            mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+            mock_sess = AsyncMock()
+            mock_sess.request = AsyncMock(return_value=mock_resp)
+            mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
+            mock_sess.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_sess
+
+            alerter = SlackAlerter(webhook_url="https://hooks.slack.com/test")
+            event = _make_event()
+            with pytest.raises(AlertDeliveryError, match="403"):
+                await alerter.send(event)
+
+
+# ─── WebhookAlerter payload structure ───────────────────────────────────────
+
+
+class TestWebhookPayload:
+    @pytest.mark.asyncio
+    async def test_payload_has_correct_structure(self):
+        """Webhook payload should contain event_type, release, verdict keys."""
+        captured_body = []
+
+        async def fake_request(method, url, **kwargs):
+            captured_body.append(kwargs.get("data", b""))
+            resp = MagicMock()
+            resp.status = 200
+            resp.headers = {}
+            resp.release = MagicMock()
+            resp.__aenter__ = AsyncMock(return_value=resp)
+            resp.__aexit__ = AsyncMock(return_value=False)
+            return resp
+
+        with patch("aiohttp.ClientSession") as mock_cls:
+            mock_sess = AsyncMock()
+            mock_sess.request = fake_request
+            mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
+            mock_sess.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_sess
+
+            alerter = WebhookAlerter(url="https://example.com/hook")
+            event = _make_event()
+            await alerter.send(event)
+
+        assert len(captured_body) == 1
+        payload = json.loads(captured_body[0])
+        assert payload["event_type"] == "depvet.release_analyzed"
+        assert "timestamp" in payload
+        assert payload["release"]["name"] == "evil-pkg"
+        assert payload["verdict"]["verdict"] == "MALICIOUS"
+        assert payload["verdict"]["severity"] == "CRITICAL"
